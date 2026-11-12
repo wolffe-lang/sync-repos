@@ -1,0 +1,18 @@
+use std.fs
+
+fn main() -> int {
+	let home = env_get("HOME") else {
+		eprint("sync-repos: HOME is not set, so there is nowhere to look for a config")
+		return 1
+	}
+
+	let path = "{home}/.config/sync-repos/orgs.conf"
+	let text = fs.read_text(path) else {
+		eprint("sync-repos: cannot read {path}")
+		return 1
+	}
+
+	print_raw(text)
+
+	0
+}
