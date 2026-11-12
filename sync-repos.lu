@@ -1,6 +1,7 @@
 use std.fs
 use conf
 use paths
+use git
 
 fn main() -> int {
 	let where = paths.from_env() else {
@@ -42,6 +43,19 @@ fn main() -> int {
 		eprint("sync-repos: {where.config} names no organizations")
 		return 1
 	}
+
+	let code = git.run(".", ["--version"]) else |e| match e{
+		not_found => {
+			eprint("sync-repos: cannot run git; is it installed and on PATH?")
+			return 1
+		},
+		io => {
+			eprint("sync-repos: could not start git")
+			return 1
+		}
+	}
+
+	print("git exited with status {code}")
 
 	print("syncing into {where.root}")
 

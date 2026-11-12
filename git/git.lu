@@ -1,5 +1,38 @@
 //! Running git: one child process at a time.
 
+use std.fs
 use std.env
 use std.process
 
+/// The ways a git command can fail to give an exit status.
+pub error Failure = {not_found, io}
+
+/// How one git command ended.
+pub struct Ran {
+	/// The exit status: 0 is success.
+	code: int,
+	/// What it wrote to standard output, at most a few lines.
+	out: str,
+}
+
+/// The program to run as git: `$SYNC_REPOS_GIT`, else `git`.
+fn program() -> str {
+	let named = env_get("SYNC_REPOS_GIT") else ""
+	if named == "" { "git" } else { named }
+}
+
+/// Run `git ARGS` in directory `dir` and answer its exit status
+pub fn run(dir: str, args: List[str]) -> int ! Failure {
+	let back = env.cwd()?
+	env.set_cwd(dir) else |_| { return not_found }
+	defer env.set_cwd(back) else |_| {}
+
+	var command = process.command(program())
+
+	for a in args { process.push_arg(mut command, a) } 
+
+	process.run(command) else |e| match e {
+		not_found => { return not_found },
+		_ => { return io },
+	}
+}
