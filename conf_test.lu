@@ -58,3 +58,7 @@ fn test_refusals_name_the_line() {
 	)
 	assert(refusal("..=b") == "line 1: the local directory cannot be `..`", refusal("..=b"))
 }
+
+fn test_a_trailing_colon_is_an_empty_name() {
+	assert(refusal("a=b:") == "line 1: the repository name is empty", refusal("a=b:"))
+}
