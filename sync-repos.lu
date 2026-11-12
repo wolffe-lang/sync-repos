@@ -1,40 +1,48 @@
 use std.fs
 use conf
-
+use paths
 
 fn main() -> int {
-	let home = env_get("HOME") else {
-		eprint("sync-repos: HOME is not set, so there is nowhere to look for a config")
+	let where = paths.from_env() else {
+		eprint(
+			"sync-repos: HOME is not set; set it, or set both SYNC_REPOS_CONFIG and GITHUB_ORGS_DIR"
+		)
+		
 		return 1
 	}
 
-	let path = "{home}/.config/sync-repos/orgs.conf"
-	let text = fs.read_text(path) else |e| match e {
+	let text = fs.read_text(where.config) else |e| match e {
 		not_found => {
-			eprint("sync-repos: no config at {path}")
+			eprint("sync-repos: no config at {where.config}")
 			eprint("  one line per organization, LOCAL_DIR=ORG; see orgs.conf.example")
 			return 1
 		},
 		denied => {
-			eprint("sync-repos: {path}: permission denied")
+			eprint("sync-repos: {where.config} permission denied")
 			return 1
 		},
 		utf8 => {
-			eprint("sync-repos: {path} is not UTF-8 text")
+			eprint("sync-repos: {where.config} is not UTF-8 text")
 			return 1
 		},
 		io => {
-			eprint("sync-repos: {path}: read error")
+			eprint("sync-repos: {where.config}: read error")
 			return 1
 		},
 	}
 
 	let orgs = conf.parse(text) else |e| match e {
 		Malformed(why) => {
-			eprint("sync-repos: {path}: {why}")
+			eprint("sync-repos: {where.config}: {why}")
 			return 1
 		},
 	}
+
+	if orgs.len == 0 {
+		eprint("sync-repos: {where.config} names no organizations")
+	}
+
+	print("syncing into {where.root}")
 
 	for org in orgs {
 		if org.repos.len == 0 {
