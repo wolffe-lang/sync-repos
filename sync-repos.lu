@@ -7,12 +7,41 @@ fn main() -> int {
 	}
 
 	let path = "{home}/.config/sync-repos/orgs.conf"
-	let text = fs.read_text(path) else {
-		eprint("sync-repos: cannot read {path}")
-		return 1
+	let text = fs.read_text(path) else |e| match e {
+		not_found => {
+			eprint("sync-repos: no config at {path}")
+			eprint("  one line per organization, LOCAL_DIR=ORG; see orgs.conf.example")
+			return 1
+		},
+		denied => {
+			eprint("sync-repos: {path}: permission denied")
+			return 1
+		},
+		utf8 => {
+			eprint("sync-repos: {path} is not UTF-8 text")
+			return 1
+		},
+		io => {
+			eprint("sync-repos: {path}: read error")
+			return 1
+		},
 	}
 
-	print_raw(text)
+	var count = 0
+	for line in text.lines() {
+		let entry = line.trim()
+		if entry == "" || entry.starts_with("#") {
+			continue
+		}
+
+		count += 1
+		print("{count}: {entry}")
+	}
+
+	if count == 0 {
+		eprint("sync-repos: {path} names no organizations")
+		return 1
+	}
 
 	0
 }
