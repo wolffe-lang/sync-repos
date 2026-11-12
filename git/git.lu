@@ -1,11 +1,11 @@
-//! Running git: one child process at a time.
+//! Running git: one child process at a time, with a time limit.
 
 use std.fs
 use std.env
 use std.process
 
 /// The ways a git command can fail to give an exit status.
-pub error Failure = {not_found, io}
+pub error Failure = {not_found, timeout, io}
 
 /// How one git command ended.
 pub struct Ran {
@@ -21,8 +21,30 @@ fn program() -> str {
 	if named == "" { "git" } else { named }
 }
 
-/// Run `git ARGS` in directory `dir` and answer its exit status
-pub fn run(dir: str, args: List[str]) -> int ! Failure {
+/// Wait for `child` to end, looking every 20 ms, for at most `limit_ms`.
+fn wait_within(take child: process.Child, limit_ms: int) -> int ! {timeout, io} {
+	var child = child
+	let deadline = time_now_ms() + limit_ms
+
+	loop {
+		let change = process.poll()?
+		if change.changed && change.child.slot == child.slot {
+			return process.shell_code(change.status)
+		}
+
+		if time_now_ms() >= deadline {
+			process.kill(mut child) else |_| {}
+			process.wait(take child) else |_| { 0 }
+
+			return timeout
+		}
+
+		time_sleep_ms(20)
+	}
+}
+
+/// Run `git ARGS` in directory `dir`, keeping what it prints, for at most `limit_ms`.
+pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 	let back = env.cwd()?
 	env.set_cwd(dir) else |_| { return not_found }
 	defer env.set_cwd(back) else |_| {}
@@ -31,8 +53,29 @@ pub fn run(dir: str, args: List[str]) -> int ! Failure {
 
 	for a in args { process.push_arg(mut command, a) } 
 
-	process.run(command) else |e| match e {
+	var pipe = process.pipe()?
+	var null = fs.open_mode("/dev/null", 2) else |_| return { io }
+
+	process.set_stdin(mut command, null)
+	process.set_stdout(mut command, pipe.write)
+	process.set_stderr(mut command, null)
+
+	var child = process.start(command) else |e| match e{
 		not_found => { return not_found },
 		_ => { return io },
 	}
+
+	fs.close(take pipe.write) else |_| {}
+	fs.close(take null) else |_| {}
+	defer fs.close(take pipe.read) else |_| {}
+
+	let code = wait_within(take child, limit_ms)?
+	var out = ""
+
+	loop {
+		let piece = fs.read(mut pipe.read, 4096) else { break }
+		out = out + piece
+	}
+
+	Ran { code: code, out: out.trim() }
 }

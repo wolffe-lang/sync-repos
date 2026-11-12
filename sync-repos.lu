@@ -44,10 +44,14 @@ fn main() -> int {
 		return 1
 	}
 
-	let code = git.run(".", ["--version"]) else |e| match e{
+	let version = git.run(".", ["--version"], 5000) else |e| match e{
 		not_found => {
 			eprint("sync-repos: cannot run git; is it installed and on PATH?")
 			return 1
+		},
+		timeout => {
+			eprint("sync-repos: git --version did not answer in 5 seconds")
+			return 1	
 		},
 		io => {
 			eprint("sync-repos: could not start git")
@@ -55,8 +59,7 @@ fn main() -> int {
 		}
 	}
 
-	print("git exited with status {code}")
-
+	print("using {version.out}")
 	print("syncing into {where.root}")
 
 	for org in orgs {
