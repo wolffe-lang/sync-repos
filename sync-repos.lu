@@ -40,6 +40,7 @@ fn main() -> int {
 
 	if orgs.len == 0 {
 		eprint("sync-repos: {where.config} names no organizations")
+		return 1
 	}
 
 	print("syncing into {where.root}")
