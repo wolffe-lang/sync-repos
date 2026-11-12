@@ -1,0 +1,33 @@
+//! member: false
+//! Path decisions, without touching the environment.
+
+use paths
+
+fn test_defaults_hang_off_home() {
+	let p = paths.resolve("/home/you", "", "") else { assert(false, "refused"); return }
+	assert(p.config == "/home/you/.config/sync-repos/orgs.conf", p.config)
+	assert(p.root == "/home/you/GithubOrgs", p.root)
+}
+
+fn test_each_override_wins_alone() {
+	let p = paths.resolve("/home/you", "/etc/orgs.conf", "") else {
+		assert(false, "refused")
+		return
+	}
+
+	assert(p.config == "/etc/orgs.conf", p.config)
+	assert(p.root == "/home/you/GithubOrgs", p.root)
+}
+
+fn test_no_home_is_fine_when_nothing_needs_it() {
+    let p = paths.resolve("", "/etc/orgs.conf", "/srv/orgs") else {
+        assert(false, "refused")
+        return
+    }
+    assert(p.root == "/srv/orgs", p.root)
+}
+
+fn test_no_home_is_refused_when_something_needs_it() {
+    let p = paths.resolve("", "/etc/orgs.conf", "") else { return }
+    assert(false, "accepted, with root {p.root}")
+}

@@ -1,0 +1,29 @@
+//! Where things live: every path the program uses, decided once.
+
+/// The places sync-repos reads and writes
+pub struct Paths {
+	/// The config file.
+	config: str,
+	/// The dictionary that holds one directory per organization.
+	root: str,
+}
+
+/// Decide the paths from three settings, each `""` when unset: the home
+/// directory, an explicit config file, an explicit root.
+pub fn resolve(home: str, config: str, root: str) -> Paths ! {no_home} {
+	if home == "" && (config == "" || root == "") { return no_home }
+	Paths {
+		config: if config == "" { "{home}/.config/sync-repos/orgs.conf" } else { config },
+		root: if root == "" { "{home}/GithubOrgs" } else { root },
+	}
+}
+
+/// The paths this process should use: `$SYNC_REPOS_CONFIG` and 
+/// `$GITHUB_ORGS_DIR` when set, else their places under `$HOME`.
+pub fn from_env() -> Paths ! {no_home} {
+	resolve(
+		env_get("HOME") else "",
+		env_get("SYNC_REPOS_CONFIG") else "",
+		env_get("GITHUB_ORGS_DIR") else "",
+	)
+}
