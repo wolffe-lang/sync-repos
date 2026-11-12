@@ -1,0 +1,41 @@
+//! The config file: one organization a line, parsed into values.
+
+/// One line of orgs.conf, understood.
+pub struct Org {
+	/// The directory under the sync root that holds this org's checkouts.
+	local_dir: str,
+	/// The organization (or user) on Github.
+	name: str,
+	/// The repositories to sync. Empty means "ask Github for all of them"
+	repos: List[str],
+}
+
+/// A name that becomes one path segment: not empty, no slash, not `.` or `..`.
+fn segment(what: str, name: str) -> str ! {Malformed(str)} {
+	if name == "" { return Malformed("the {what} is empty") }
+	if name.contains("/") { return Malformed("the {what} `{name}` has a `/` in it") }
+	if name == "." || name == ".." { return Malformed("the {what} cannot be `{name}`") }
+
+	name
+}
+
+/// Read one entry, `LOCAL_DIR=ORG` or `LOCAL_DIR=ORG:repo1,repo2`.
+/// The caller has already dropped blank lines and comments.
+pub fn parse_entry(entry: str) -> Org ! {Malformed(str)} {
+	let (left, right) = entry.split_once("=") else {
+		return Malformed("no `=`; an entry is LOCAL_DIR=ORG")
+	}
+
+	let local_dir = segment("local directory", left.trim())?
+	let (org, list) = right.split_once(":") else (right, "")
+	let name = segment("organization", org.trim())?
+	var repos = List[str]()
+
+	if right.contains(":") {
+		for piece in list.split(",") {
+			(mut repos).push(segment("repository name", piece.trim())?)
+		}
+	}
+
+	Org { local_dir: local_dir, name: name, repos: repos }
+}

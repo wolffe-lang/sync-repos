@@ -1,0 +1,27 @@
+//! member: false
+//! The config parser: one entry in, one value out.
+
+use conf
+
+fn test_an_org_with_no_list() {
+	let o = conf.parse_entry("wolffe-lang=wolffe-lang") else {
+		assert(false, "refused")
+		return
+	}
+
+	assert(o.local_dir == "wolffe-lang", "local_dir is {o.local_dir}")
+	assert(o.name == "wolffe-lang", "name is {o.name}")
+	assert(o.repos.len == 0, "{o.repos.len} repos")
+}
+
+fn test_a_list_of_repos() {
+	let o = conf.parse_entry("mine = someone : dotfiles, notes") else {
+		assert(false, "refused")
+		return
+	}
+
+	assert(o.local_dir == "mine", "local_dir is {o.local_dir}")
+	assert(o.name == "someone", "name is {o.name}")
+	assert(o.repos.len == 2, "{o.repos.len} repos")
+	assert(o.repos[0] == "dotfiles" && o.repos[1] == "notes", "repos are {o.repos}")
+}
