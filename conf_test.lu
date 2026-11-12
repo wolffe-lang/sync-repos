@@ -1,7 +1,15 @@
 //! member: false
-//! The config parser: one entry in, one value out.
+//! The config parser: text in, values out, refusals by line.
 
 use conf
+
+fn refusal(text: str) -> str {
+	let orgs = conf.parse(text) else |e| match e {
+		Malformed(why) => { return why },
+	}
+
+	"accepted {orgs.len} entries"
+}
 
 fn test_an_org_with_no_list() {
 	let o = conf.parse_entry("wolffe-lang=wolffe-lang") else {
@@ -24,4 +32,29 @@ fn test_a_list_of_repos() {
 	assert(o.name == "someone", "name is {o.name}")
 	assert(o.repos.len == 2, "{o.repos.len} repos")
 	assert(o.repos[0] == "dotfiles" && o.repos[1] == "notes", "repos are {o.repos}")
+}
+
+fn test_comments_and_blanks_are_skipped() {
+	let orgs = conf.parse("# mine\n\n  a=b\n\t# indented comment\nc=d:e\n") else {
+		assert(false, "refused")
+		return
+	}
+
+	assert(orgs.len == 2, "{orgs.len} entries")
+	assert(orgs[1].repos.len == 1, "{orgs[1].repos.len} repos")
+}
+
+fn test_refusals_name_the_line() {
+	assert(
+		refusal("a=b\nnonsense\n") == "line 2: no `=`; an entry is LOCAL_DIR=ORG",
+		refusal("a=b\nnonense\n"),
+	)
+	assert(refusal("=b") == "line 1: the local directory is empty", refusal("=b"))
+	assert(refusal("a=") == "line 1: the organization is empty", refusal("a="))
+	assert(refusal("a=b:c,,d") == "line 1: the repository name is empty", refusal("a=b:c,,d"))
+	assert(
+		refusal("../etc=b") == "line 1: the local directory `../etc` has a `/` in it",
+		refusal("../etc=b"),
+	)
+	assert(refusal("..=b") == "line 1: the local directory cannot be `..`", refusal("..=b"))
 }

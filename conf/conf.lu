@@ -39,3 +39,25 @@ pub fn parse_entry(entry: str) -> Org ! {Malformed(str)} {
 
 	Org { local_dir: local_dir, name: name, repos: repos }
 }
+
+/// Read a whole config. Blank lines and `#` comments are skipped; the first
+/// entry that cannot be read ends the parse, with its line number.
+pub fn parse(text: str) -> List[Org] ! {Malformed(str)} {
+	var orgs = List[Org]()
+	var number = 0
+
+	for line in text.lines() {
+		number += 1
+		let entry = line.trim()
+
+		if entry == "" || entry.starts_with("#") { continue }
+
+		let org = parse_entry(entry) else |e| match e {
+			Malformed(why) => { return Malformed("line {number}: {why}") }
+		}
+
+		(mut orgs).push(org)
+	}
+
+	orgs
+}
