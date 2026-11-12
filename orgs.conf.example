@@ -1,0 +1,10 @@
+# ~/.config/sync-repos/orgs.conf
+#
+# One organization (or user) a line:
+#
+#   LOCAL_DIR=ORG              every repository of ORG, under ~/GithubOrgs/LOCAL_DIR
+#   LOCAL_DIR=ORG:repo1,repo2  only these repositories; no listing is made
+#
+# Blank lines and lines starting with # are skipped.
+
+wolffe-lang=wolffe-lang
