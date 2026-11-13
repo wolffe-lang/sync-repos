@@ -63,3 +63,19 @@ pub fn pull(path: str, limit_ms: int) -> Pulled ! git.Failure {
 
 	if before.out == after.out { Pulled.UpToDate } else { Pulled.Updated }
 }
+
+/// The arguments for clone attempt `attempt` of `of`: a full clone, and a 
+/// shallow one on the last attempt.
+pub fn clone_args(url: str, name: str, attempt: int, of: int) -> List[str] {
+	var args = ["clone", "--quiet"]
+
+	if attempt == of && of > 1 {
+		(mut args).push("--depth")
+		(mut args).push("1")
+	}
+
+	(mut args).push(url)
+	(mut args).push(name)
+
+	args
+}
