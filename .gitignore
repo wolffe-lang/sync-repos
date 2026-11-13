@@ -1,3 +1,4 @@
 .lu-cache/
 sync-repos
 *.o
+test/
