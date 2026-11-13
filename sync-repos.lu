@@ -3,12 +3,37 @@ use conf
 use paths
 use git
 use checkout
+use report
 
 /// How long one clone attempt or one pull may take
 const SLOW_MS: int = 300000
 
 /// How many times a clone is tried.
 const TRIES: int = 3
+
+/// What one repository's turn amounted to.
+enum Did {
+	Cloned,
+	Updated,
+	/// Already up to date: counted nowhere.
+	Nothing,
+	Skipped,
+	Failed,
+}
+
+/// Count one repository's result. `name` is kept only for a failure.
+fn record(mut t: report.Tally, did: Did, name: str) {
+	match did {
+		Did.Cloned => { t.cloned += 1 },
+		Did.Updated => { t.updated += 1 },
+		Did.Nothing => {},
+		Did.Skipped => { t.skipped += 1 },
+		Did.Failed => {
+			t.failed += 1
+			(mut t.failures).push(name)
+		}
+	}
+}
 
 /// Where an organization's repositories are cloned from.
 fn remote_of(org: str, repo: str) -> str {
@@ -17,46 +42,88 @@ fn remote_of(org: str, repo: str) -> str {
 }
 
 /// Bring one repository up to date, or say why it was left alone.
-fn sync_repo(org: str, repo: str, dir: str) -> () ! git.Failure {
+fn sync_repo(org: str, repo: str, dir: str, color: bool) -> Did ! git.Failure {
 	let path = "{dir}/{repo}"
 
 	match checkout.inspect(path)? {
-		checkout.State.Absent | checkout.State.Empty => {
-			print("  cloning {repo}...")
-
-			match checkout.clone(remote_of(org, repo), dir, repo, TRIES, SLOW_MS)? {
-				checkout.Cloned.Full => { print("  {repo} (cloned)") },
-				checkout.Cloned.Shallow => { print("  {repo} (cloned shallow)")}
-				checkout.Cloned.GaveUp => {
-					print("  {repo} (clone failed after {TRIES} attempts)")
-				},
-			}
-		},
 		checkout.State.Foreign => {
-			print("  {repo} (exists but is not a git checkout, skipping)")
+			print(report.warn("{repo} (exists but is not a git checkout, skipping)", color))
+			Did.Skipped
 		},
 		checkout.State.Broken => {
-			print("  {repo} (git cannot read it, skipping)")
+			print(report.warn("{repo} (git cannot read it, skipping)", color))
+			Did.Skipped
 		},
 		checkout.State.Dirty => {
-			print("  {repo} (uncommitted changes, skipping)")
+			print(report.warn("{repo} (uncommitted changes, skipping)", color))
+			Did.Skipped
 		},
 		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
-			checkout.Pulled.UpToDate => { print("  {repo} (up to date)") },
-			checkout.Pulled.Updated => { print("  {repo} (updated)") }
-			checkout.Pulled.Refused => { print("  {repo} (cannot fast-forward, skipping)") },
+			checkout.Pulled.UpToDate => {
+				print(report.good("{repo} (up to date)", color))
+				Did.Nothing
+			}, 
+			checckout.Pulled.Updated => {
+				print(report.good("{repo} (updated)", color))
+				Did.Updated
+			},
+			checkout.Pulled.Refused => {
+				print(report.warn("{repo} (cannot fast-forward, skipping)", color))
+				Did.Skipped
+			},
 		},
+		checkout.State.Absent | checkout.State.Empty => {
+			print(report.info("cloning {repo}...", color))
+
+			match checkout.clone(remote_of(org, repo), dir, repo, TRIES, SLOW_MS)? {
+				checkout.Cloned.Full => {
+					print(report.good("{repo} (cloned)", color))
+					Did.Cloned
+				},
+				checkout.Cloned.Shallow => {
+					print(report.good("{repo} (cloned shallow)", color))
+					Did.Cloned
+				},
+				checkout.Cloned.GaveUp => {
+					print(report.bad("{repo} (clone failed after {TRIES} attempts)", color))
+					Did.Failed
+				},
+			}
+		}
 	}
 }
 
 /// Sync every named repository of one organization.
-fn sync_org(org: conf.Org, root: str) -> () ! git.Failure {
+fn sync_org(org: conf.Org, root: str, color: bool) -> report.Tally ! git.Failure {
+	var tally = report.empty()
 	let dir = "{root}/{org.local_dir}"
+
+	print("")
 	print("== {org.local_dir} <- {org.name}")
 
-	for repo in org.repos {
-		sync_repo(org.name, repo, dir)?
+	if org.repos.len == 0 {
+		print(
+			report.warn(
+				"no repositories named; listing an organization arrives in Part II",
+				color,
+			),
+		)
+
+		return tally
 	}
+
+	fs.create_dir_all(dir) else |_| { return io }
+
+	for repo in org.repos {
+		let did = region scratch {
+			sync_repo(org.name, repo, dir, color)?
+		}
+
+		record(mut tally, did, "{org.name}/{repo}")
+	}
+
+	print("  {report.line(tally)}")
+	tally
 }
 
 fn main() -> int {
@@ -102,22 +169,34 @@ fn main() -> int {
 
 	print("syncing into {where.root}")
 
+	let color = report.color_wanted()
+	var total = report.empty()
+
 	for org in orgs {
-		sync_org(org, where.root) else |e| match e {
+		let part = sync_org(org, where.root, color) else |e| match e {
 			not_found => {
 				eprint("sync-repos: cannot run git; is it installed and on PATH?")
 				return 1
-			},
+			}, 
 			timeout => {
 				eprint("sync-repos: git did not answer a local question in time")
 				return 1
-			}
+			},
 			io => {
 				eprint("sync-repos: cannot work in {where.root}/{org.local_dir}")
 				return 1
 			},
 		}
+
+		report.add(mut total, part)
 	}
 
-	0
+	print("")
+	print("== done: {report.line(total)}")
+
+	for name in total.failures {
+		print("  failed: {name}")
+	}
+	
+	if total.failed > 0 { 1 } else { 0 }
 }
