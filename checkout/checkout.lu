@@ -31,6 +31,16 @@ pub enum Pulled {
 	Refused,
 }
 
+/// How a clone ended.
+pub enum Cloned {
+	/// A full clone.
+	Full,
+	/// A clone with history cut to the newest commit.
+	Shallow,
+	/// Every attempt failed or ran out of time. Nothing is left behind.
+	GaveUp,
+}
+
 /// How long a quick local git command may take.
 const QUICK_MS: int = 30000
 
@@ -78,4 +88,35 @@ pub fn clone_args(url: str, name: str, attempt: int, of: int) -> List[str] {
 	(mut args).push(name)
 
 	args
+}
+
+/// Clone `url` into `parent/name`, trying up to `tries` times. A failed
+/// attempt's leftovers are removed before the next. A time limit reached
+/// counts as a failed attempt, not as a failure of the whole clone.
+pub fn clone(url: str, parent: str, name: str, tries: int, limit_ms: int) -> Cloned ! git.Failure {
+	let path = "{parent}/{name}"
+
+	var attempt = 1
+	while attempt <= tries {
+		if fs.exists(path) { fs.remove_dir_all(path) else |_| { return io } }
+		let ran = git.run(
+			parent,
+			clone_args(url, name, attempt, tries),
+			limit_ms,
+		) else |e| match e {
+			not_found => { return not_found },
+			timeout => { git.Ran { code: 124, out: "" } },
+			io => { return io },
+		}
+
+		if ran.code == 0 && fs.exists("{path}/.git") {
+			return if attempt == tries && tries > 1 { Cloned.Shallow } else { Cloned.Full }
+		}
+
+		attempt += 1
+	}
+
+	if fs.exists(path) { fs.remove_dir_all(path) else |_| {} }
+
+	Cloned.GaveUp
 }

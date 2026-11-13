@@ -4,16 +4,33 @@ use paths
 use git
 use checkout
 
-/// How long a pull may take.
+/// How long one clone attempt or one pull may take
 const SLOW_MS: int = 300000
 
+/// How many times a clone is tried.
+const TRIES: int = 3
+
+/// Where an organization's repositories are cloned from.
+fn remote_of(org: str, repo: str) -> str {
+	let base = env_get("SYNC_REPOS_REMOTE") else ""
+	if base == "" { "https://github.com/{org}/{repo}.git" } else { "{base}/{org}/{repo}.git" }
+}
+
 /// Bring one repository up to date, or say why it was left alone.
-fn sync_repo(repo: str, dir: str) -> () ! git.Failure {
+fn sync_repo(org: str, repo: str, dir: str) -> () ! git.Failure {
 	let path = "{dir}/{repo}"
 
 	match checkout.inspect(path)? {
 		checkout.State.Absent | checkout.State.Empty => {
-			print("  {repo} (not cloned yet)")
+			print("  cloning {repo}...")
+
+			match checkout.clone(remote_of(org, repo), dir, repo, TRIES, SLOW_MS)? {
+				checkout.Cloned.Full => { print("  {repo} (cloned)") },
+				checkout.Cloned.Shallow => { print("  {repo} (cloned shallow)")}
+				checkout.Cloned.GaveUp => {
+					print("  {repo} (clone failed after {TRIES} attempts)")
+				},
+			}
 		},
 		checkout.State.Foreign => {
 			print("  {repo} (exists but is not a git checkout, skipping)")
@@ -38,7 +55,7 @@ fn sync_org(org: conf.Org, root: str) -> () ! git.Failure {
 	print("== {org.local_dir} <- {org.name}")
 
 	for repo in org.repos {
-		sync_repo(repo, dir)?
+		sync_repo(org.name, repo, dir)?
 	}
 }
 
