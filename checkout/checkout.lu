@@ -1,0 +1,42 @@
+//! One repository's directory on disk: what state it is in, and how to
+//! bring it up to date
+
+use git
+use std.fs
+
+/// what is at a repository's path before anything is done to it.
+pub enum State {
+	/// Nothing is there.
+	Absent,
+	/// An empty directory: safe to remove and clone into.
+	Empty,
+	/// A directory with files in it that is not a git checkout.
+	Foreign,
+	/// It has a `.git` but git cannot read a commit from it.
+	Broken,
+	/// A checkout with staged or unstaged changes.
+	Dirty,
+	/// A checkout with nothing to lose.
+	Clean,
+}
+
+/// How long a quick local git command may take.
+const QUICK_MS: int = 30000
+
+/// Look at `path` and say which state it is in. Reads only.
+pub fn inspect(path: str) -> State ! git.Failure {
+	if !fs.exists(path) { return State.Absent }
+	if !fs.exists("{path}/.git") {
+		let names = fs.read_dir(path) else |_| { return State.Foreign }
+		return if names.len == 0 { State.Empty } else { State.Foreign }
+	}
+
+	let head = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?	
+	if head.code != 0 { return State.Broken }
+
+	let unstaged = git.run(path, ["diff", "--quiet"], QUICK_MS)?
+	let staged = git.run(path, ["diff", "--cached", "--quiet"], QUICK_MS)?
+	if unstaged.code != 0 || staged.code != 0 { return State.Dirty }
+
+	State.Clean
+}

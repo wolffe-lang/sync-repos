@@ -2,6 +2,30 @@ use std.fs
 use conf
 use paths
 use git
+use checkout
+
+/// One word for a state, for now.
+fn describe(state: checkout.State) -> str {
+	match state {
+		checkout.State.Absent => "absent",
+		checkout.State.Empty => "an empty directory",
+		checkout.State.Foreign => "not a git checkout",
+		checkout.State.Broken => "a checkout git cannot read",
+		checkout.State.Dirty => "dirty",
+		checkout.State.Clean => "clean",
+	}
+}
+
+/// Say what state each named repository of one organization is in.
+fn show_org(org: conf.Org, root: str) -> () ! git.Failure {
+	let dir = "{root}/{org.local_dir}"
+	print("== {org.local_dir} <- {org.name}")
+
+	for repo in org.repos {
+		let state = checkout.inspect("{dir}/{repo}")?
+		print("  {repo}: {describe(state)}")
+	}
+}
 
 fn main() -> int {
 	let where = paths.from_env() else {
@@ -44,32 +68,22 @@ fn main() -> int {
 		return 1
 	}
 
-	let version = git.run(".", ["--version"], 5000) else |e| match e{
-		not_found => {
-			eprint("sync-repos: cannot run git; is it installed and on PATH?")
-			return 1
-		},
-		timeout => {
-			eprint("sync-repos: git --version did not answer in 5 seconds")
-			return 1	
-		},
-		io => {
-			eprint("sync-repos: could not start git")
-			return 1
-		}
-	}
-
-	print("using {version.out}")
 	print("syncing into {where.root}")
 
 	for org in orgs {
-		if org.repos.len == 0 {
-			print("{org.local_dir} <- {org.name}: every repository")
-		} else {
-			print("{org.local_dir} <- {org.name}: {org.repos.len} named")
-			for repo in org.repos {
-				print("  {repo}")
+		show_org(org, where.root) else |e| match e {
+			not_found => {
+				eprint("sync-repos: cannot run git; is it installed and on PATH?")
+				return 1
+			},
+			timeout => {
+				eprint("sync-repos: git did not answer a local question in time")
+				return 1
 			}
+			io => {
+				eprint("sync-repos: cannot work in {where.root}/{org.local_dir}")
+				return 1
+			},
 		}
 	}
 
