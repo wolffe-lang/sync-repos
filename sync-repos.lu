@@ -1,9 +1,12 @@
+use std.x.tls.client
 use std.fs
 use conf
 use paths
 use git
 use checkout
 use report
+use secure
+
 
 /// How long one clone attempt or one pull may take
 const SLOW_MS: int = 300000
@@ -167,8 +170,16 @@ fn main() -> int {
 		return 1
 	}
 
-	print("syncing into {where.root}")
+	var tls = secure.connect("api.github.com", 30000) else |e| match e {
+		Unavailable(why) => {
+			eprint("sync-repos: {why}")
+			return 1
+		},
+	}
 
+	print("TLS handshake with api.github.com: done")
+	client.close(take tls) else |__| {}
+	
 	let color = report.color_wanted()
 	var total = report.empty()
 

@@ -1,0 +1,101 @@
+//! A TLS connection to a named host: the socket, and the three things the
+//! handshake needs from this machine (trusted roots, randomness, the time).
+
+use std.fs
+use std.net
+use std.time
+use std.x.tls.cert
+use std.x.tls.client
+
+/// Where the trusted root certificates are: `$SYNC_REPOS_ROOTS` else
+/// `$DEN_TLS_ROOTS`, else PAX's own file.
+pub fn roots_path() -> str{
+	let mine = env_get("SYNC_REPOS_ROOTS") else ""
+	if mine != "" { return mine }
+
+	let dens = env_get("DEN_TLS_ROOTS") else ""
+	if dens != "" { return dens }
+
+	"/etc/ssl/certs/ca-roots.der"
+}
+
+/// Every byte of a file of at most `cap` bytes.
+fn slurp(path: str, cap: int) -> List[byte] ! {Unavailable(str)} {
+	var file = fs.open(path) else |_| { return Unavailable("cannot open {path}") }
+	defer fs.close(take file) else |_| {}
+
+	var out = List[byte]()
+
+	loop {
+		let chunk = fs.read_chunk(mut file, 65536) else |e| match e{
+			eof => { break },
+			io => { return Unavailable("cannot read {path}") },
+		}
+
+		if chunk.len == 0 { break }
+		if out.len + chunk.len > cap { return Unavailable("{path} is larger than {cap} bytes") }
+
+		for b in chunk { (mut out).push(b) }
+	}
+
+	out
+}
+
+/// 64 bytes from the system's random source.
+fn entropy() -> List[byte] ! {Unavailable(str)} {
+	var file = fs.open("/dev/urandom") else |_| { return Unavailable("cannot open /dev/urandom") }
+	defer fs.close(take file) else |_| {}
+
+	var out = List[byte]()
+	while out.len < 64 {
+		let chunk = fs.read_chunk(mut file, 64 - out.len) else |_| {
+			return Unavailable("cannot read /dev/urandom")
+		}
+
+		if chunk.len == 0 { return Unavailable("/dev/urandom ended early") }
+
+		for b in chunk { (mut out).push(b) }
+	}
+
+	out
+}
+
+/// The time now, in the form certificate checks compare against.
+fn now() -> int ! {Unavailable(str)} {
+	let utc = time.local_in("UTC0", time.unix_ms() / 1000) else |_| {
+		return Unavailable("cannot read the clock as UTC")
+	}
+
+	cert.timestamp(utc.year, utc.month, utc.day, utc.hour, utc.minute, utc.second)
+}
+
+/// Connect to `host` on port 443 and complete a TLS handshake, checking the
+/// server's certificate against the trusted roots and against `host`.
+pub fn connect(host: str, limit_ms: int) -> client.Client ! {Unavailable(str)} {
+	let roots = slurp(roots_path(), 4194304)?
+	if roots.len == 0 { return Unavailable("{roots_path()} is empty") }
+
+	let random = entropy()?
+	let moment = now()?
+
+	var socket = net.connect("{host}:443") else |e| {
+		return Unavailable("cannot connect to {host}:433 ({e})")
+	}
+
+	net.set_deadline(mut socket, limit_ms) else |_| {}
+
+	let pending = client.begin(
+		take socket,
+		host,
+		roots,
+		moment,
+		random[0..32],
+		random[32..64],
+	) else |e| {
+		return Unavailable("{host} hung up during the handshake ({e}_)")
+	}
+
+	client.complete(take pending) else |e| {
+		return Unavailable("{host} did not prove who it is ({e})")
+	}
+}
