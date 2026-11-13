@@ -20,6 +20,17 @@ pub enum State {
 	Clean,
 }
 
+/// What a fast-forward pull did.
+pub enum Pulled {
+	/// The checkout already had everything.
+	UpToDate,
+	/// New commits arrived.
+	Updated,
+	/// The branch and its upstream have each moved, or there is no
+	/// upstream: nothing was changed.
+	Refused,
+}
+
 /// How long a quick local git command may take.
 const QUICK_MS: int = 30000
 
@@ -39,4 +50,16 @@ pub fn inspect(path: str) -> State ! git.Failure {
 	if unstaged.code != 0 || staged.code != 0 { return State.Dirty }
 
 	State.Clean
+}
+
+/// Fast-forward a clean checkout. Never merges and never rewrites.
+pub fn pull(path: str, limit_ms: int) -> Pulled ! git.Failure {
+	let before = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?
+	let pulled = git.run(path, ["pull", "--ff-only"], limit_ms)?
+
+	if pulled.code != 0 { return Pulled.Refused }
+
+	let after = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?
+
+	if before.out == after.out { Pulled.UpToDate } else { Pulled.Updated }
 }

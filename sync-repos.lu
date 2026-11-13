@@ -4,26 +4,41 @@ use paths
 use git
 use checkout
 
-/// One word for a state, for now.
-fn describe(state: checkout.State) -> str {
-	match state {
-		checkout.State.Absent => "absent",
-		checkout.State.Empty => "an empty directory",
-		checkout.State.Foreign => "not a git checkout",
-		checkout.State.Broken => "a checkout git cannot read",
-		checkout.State.Dirty => "dirty",
-		checkout.State.Clean => "clean",
+/// How long a pull may take.
+const SLOW_MS: int = 300000
+
+/// Bring one repository up to date, or say why it was left alone.
+fn sync_repo(repo: str, dir: str) -> () ! git.Failure {
+	let path = "{dir}/{repo}"
+
+	match checkout.inspect(path)? {
+		checkout.State.Absent | checkout.State.Empty => {
+			print("  {repo} (not cloned yet)")
+		},
+		checkout.State.Foreign => {
+			print("  {repo} (exists but is not a git checkout, skipping)")
+		},
+		checkout.State.Broken => {
+			print("  {repo} (git cannot read it, skipping)")
+		},
+		checkout.State.Dirty => {
+			print("  {repo} (uncommitted changes, skipping)")
+		},
+		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
+			checkout.Pulled.UpToDate => { print("  {repo} (up to date)") },
+			checkout.Pulled.Updated => { print("  {repo} (updated)") }
+			checkout.Pulled.Refused => { print("  {repo} (cannot fast-forward, skipping)") },
+		},
 	}
 }
 
-/// Say what state each named repository of one organization is in.
-fn show_org(org: conf.Org, root: str) -> () ! git.Failure {
+/// Sync every named repository of one organization.
+fn sync_org(org: conf.Org, root: str) -> () ! git.Failure {
 	let dir = "{root}/{org.local_dir}"
 	print("== {org.local_dir} <- {org.name}")
 
 	for repo in org.repos {
-		let state = checkout.inspect("{dir}/{repo}")?
-		print("  {repo}: {describe(state)}")
+		sync_repo(repo, dir)?
 	}
 }
 
@@ -71,7 +86,7 @@ fn main() -> int {
 	print("syncing into {where.root}")
 
 	for org in orgs {
-		show_org(org, where.root) else |e| match e {
+		sync_org(org, where.root) else |e| match e {
 			not_found => {
 				eprint("sync-repos: cannot run git; is it installed and on PATH?")
 				return 1
