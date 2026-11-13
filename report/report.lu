@@ -1,0 +1,68 @@
+//! What happened: the lines printed as the sync runs, and the counts.
+
+use std.fs
+use std.term
+
+/// Running totals for one organization or for the whole run.
+pub struct Tally {
+	cloned: int,
+	updated: int,
+	skipped: int,
+	failed: int,
+	/// `ORG/REPO` for each failure, in order.
+	failures: List[str],
+}
+
+/// A tally of nothing.
+pub fn empty() -> Tally {
+	Tally { cloned: 0, updated: 0, skipped: 0, failed: 0, failures: List[str]() }
+}
+
+/// Add `part` into `total`.
+pub fn add(mut total: Tally, part: Tally) {
+	total.cloned += part.cloned
+	total.updated += part.updated
+	total.skipped += part.skipped
+	total.failed += part.failed
+
+	for name in part.failures { (mut total.failures).push(name) }
+}
+
+/// The one-line form: `Cloned: 1 | Updated: 0 | Skipped: 2 | Failed: 0`.
+pub fn line(t: Tally) -> str {
+	"Cloned: {t.cloned} | Updated: {t.updated} | Skipped: {t.skipped} | Failed: {t.failed}"
+}
+
+/// Whether to color: standard output is a terminal and `NO _COLOR` is unset
+/// or empty.
+pub fn color_wanted() -> bool {
+	if (env_get("NO_COLOR") else "") != "" { return false }
+
+	let size = term.size(fs.stdout()) else |_| { return false }
+	size.columns > 0
+}
+
+/// A line with a sign in front, the sign colored when `color` is true.
+fn marked(sign: str, code: str, text: str, color: bool) -> str {
+	if color { "\x1b[{code}m{sign}\x1b[0m {text}" } else { "{sign} {text}" }
+}
+
+/// A line that says what is about to happen.
+pub fn info(text: str, color: bool) -> str {
+	marked("→", "34", text, color)
+}
+
+/// A line that says something worked.
+pub fn good(text: str, color: bool) -> str {
+    marked("✓", "32", text, color)
+}
+
+/// A line that says something was left alone.
+pub fn warn(text: str, color: bool) -> str {
+    marked("⚠", "33", text, color)
+}
+
+/// A line that says something failed.
+pub fn bad(text: str, color: bool) -> str {
+    marked("✗", "31", text, color)
+}

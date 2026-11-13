@@ -1,0 +1,27 @@
+//! member: false
+//! The tally and the marked lines.
+
+use report
+
+fn test_adding_tallies() {
+    var total = report.empty()
+    var part = report.empty()
+    part.cloned = 2
+    part.failed = 1
+    (mut part.failures).push("org/repo")
+    report.add(mut total, part)
+    report.add(mut total, part)
+    assert(total.cloned == 4 && total.failed == 2, report.line(total))
+    assert(total.failures.len == 2, "{total.failures.len} names")
+}
+
+fn test_the_line() {
+    var t = report.empty()
+    t.updated = 3
+    assert(report.line(t) == "Cloned: 0 | Updated: 3 | Skipped: 0 | Failed: 0", report.line(t))
+}
+
+fn test_plain_marks_have_no_escapes() {
+    assert(report.good("repo (cloned)", false) == "✓ repo (cloned)", "plain")
+    assert(report.bad("x", true) == "\x1b[31m✗\x1b[0m x", "coloured")
+}
