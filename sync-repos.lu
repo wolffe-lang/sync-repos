@@ -73,6 +73,17 @@ fn preview(state: checkout.State, repo: str, url: str, color: bool) -> Did {
 	}
 }
 
+/// Look after the submodules of a checkout that was just cloned or pulled, 
+/// and say so when there was anything to do. A failure here is a warning:
+/// the repository itself is in place.
+fn tend(path: str, repo: str, color: bool) -> () ! git.Failure {
+	match checkout.submodules(path, SLOW_MS)? {
+		checkout.Subs.None | checkout.Subs.Current => {},
+		checkout.Subs.Updated => { print(report.good("  {repo}: submodules updated", color)) },
+		checkout.Subs.Failed => { print(report.warn("  {repo}: submodule update failed", color)) } ,
+	}
+}
+
 /// Bring one repository up to date, or say why it was left alone.
 fn sync_repo(
 	org: str, 
@@ -102,10 +113,12 @@ fn sync_repo(
 		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
 			checkout.Pulled.UpToDate => {
 				print(report.good("{repo} (up to date)", color))
+				tend(path, repo, color)?
 				Did.Nothing
 			}, 
 			checkout.Pulled.Updated => {
 				print(report.good("{repo} (updated)", color))
+				tend(path, repo, color)?
 				Did.Updated
 			},
 			checkout.Pulled.Refused => {
@@ -119,10 +132,12 @@ fn sync_repo(
 			match checkout.clone(url, dir, repo, TRIES, SLOW_MS)? {
 				checkout.Cloned.Full => {
 					print(report.good("{repo} (cloned)", color))
+					tend(path, repo, color)?
 					Did.Cloned
 				},
 				checkout.Cloned.Shallow => {
 					print(report.good("{repo} (cloned shallow)", color))
+					tend(path, repo, color)?
 					Did.Cloned
 				},
 				checkout.Cloned.GaveUp => {

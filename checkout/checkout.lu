@@ -20,6 +20,46 @@ pub enum State {
 	Clean,
 }
 
+/// What looking after a checkout's submodules came to.
+pub enum Subs {
+    /// The repository has none.
+    None,
+    /// Every submodule is already at the commit the repository records.
+    Current,
+    /// At least one was fetched or moved.
+    Updated,
+    /// git could not report on them, or the update failed or ran out of time.
+    Failed,
+}
+
+/// Whether `git submodule status` output shows work to do: a line that
+/// starts with `-` (never fetched) or `+` (at a different commit).
+pub fn stale(status: str) -> bool {
+    for line in status.lines() {
+        if line.starts_with("-") || line.starts_with("+") { return true }
+    }
+    false
+}
+
+/// Bring the submodules of the checkout at `path` to the commits it
+/// records. Does nothing, and runs nothing, when there is no `.gitmodules`.
+pub fn submodules(path: str, limit_ms: int) -> Subs ! git.Failure {
+    if !fs.exists("{path}/.gitmodules") { return Subs.None }
+    let status = git.run(path, ["submodule", "status", "--recursive"], QUICK_MS)?
+    if status.code != 0 { return Subs.Failed }
+    if !stale(status.out) { return Subs.Current }
+    let ran = git.run(
+        path,
+        ["submodule", "update", "--init", "--recursive"],
+        limit_ms,
+    ) else |e| match e {
+        not_found => { return not_found },
+        timeout => { git.Ran { code: 124, out: "" } },
+        io => { return io },
+    }
+    if ran.code == 0 { Subs.Updated } else { Subs.Failed }
+}
+
 /// What a fast-forward pull did.
 pub enum Pulled {
 	/// The checkout already had everything.

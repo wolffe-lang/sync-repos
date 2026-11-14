@@ -17,3 +17,13 @@ fn test_a_single_attempt_is_never_shallow() {
     let args = checkout.clone_args("u", "r", 1, 1)
     assert("{args}" == "[clone, --quiet, u, r]", "{args}")
 }
+
+fn test_a_current_submodule_is_not_stale() {
+	assert(!checkout.stale(" 3f2a9c1 vendor/lib (v1.2)"), "a leading space means current")
+	assert(!checkout.stale(""), "no submodules, nothing stale")
+}
+
+fn test_an_unfetched_or_moved_submodule_is_stale() {
+	assert(checkout.stale("-3f2a9c1 vendor/lib"), "never fetched")
+	assert(checkout.stale(" 3f2a9c1 vendor/a (v1)\n+77b0e2d vendor/b (v2-3-g77b0e2d)"), "moved")
+}
