@@ -1,0 +1,46 @@
+//! member: false
+//! The command line, read into choices.
+
+use options
+
+fn shown(args: List[str], protocol: str) -> str {
+    let o = options.parse(args, protocol) else |e| match e {
+        Usage(why) => { return "refused: {why}" },
+    }
+    "dry={o.dry_run} help={o.help} only=[{o.only}] ssh={o.ssh}"
+}
+
+fn test_no_arguments_is_the_plain_run() {
+    let got = shown(List[str](), "")
+    assert(got == "dry=false help=false only=[] ssh=false", got)
+}
+
+fn test_both_spellings_of_dry_run() {
+    assert(shown(["-n"], "") == "dry=true help=false only=[] ssh=false", shown(["-n"], ""))
+    assert(shown(["--dry-run"], "") == shown(["-n"], ""), shown(["--dry-run"], ""))
+}
+
+fn test_only_takes_the_next_argument() {
+    let got = shown(["--only", "wolf", "-n"], "")
+    assert(got == "dry=true help=false only=[wolf] ssh=false", got)
+}
+
+fn test_only_with_nothing_after_it() {
+    let got = shown(["--only"], "")
+    assert(got == "refused: --only needs a name after it", got)
+}
+
+fn test_an_unknown_option_is_refused() {
+    let got = shown(["--force"], "")
+    assert(got == "refused: `--force` is not an option this program has", got)
+}
+
+fn test_the_protocol_setting() {
+    assert(
+        shown(List[str](), "ssh") == "dry=false help=false only=[] ssh=true",
+        shown(List[str](), "ssh"),
+    )
+    assert(shown(List[str](), "https") == shown(List[str](), ""), shown(List[str](), "https"))
+    let got = shown(List[str](), "ftp")
+    assert(got == "refused: SYNC_REPOS_PROTOCOL is `ftp`; it must be https or ssh", got)
+}

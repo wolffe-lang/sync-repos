@@ -1,8 +1,10 @@
+use std.env
 use std.fs
 use conf
 use paths
 use git
 use github
+use options
 use checkout
 use report
 
@@ -128,7 +130,26 @@ fn repos_of(org: conf.Org, token: str, color: bool) -> List[str] ! {Failed(str)}
     names
 }
 
+/// Whether `--only NAME` lets this entry through. No name lets all through.
+fn chosen(org: conf.Org, only: str) -> bool {
+	only == "" || org.local_dir == only || org.name == only
+}
+
 fn main() -> int {
+	let opts = options.parse(env.args(), env_get("SYNC_REPOS_PROTOCOL") else "") else |e| match e {
+		Usage(why) => {
+			eprint("sync-repos: {why}")
+			eprint(options.usage())
+
+			return 2
+		},
+	}
+
+	if opts.help {
+		print(options.usage())
+		return 0
+	}
+
 	let where = paths.from_env() else {
 		eprint(
 			"sync-repos: HOME is not set; set it, or set both SYNC_REPOS_CONFIG and GITHUB_ORGS_DIR"
@@ -169,6 +190,16 @@ fn main() -> int {
 		return 1
 	}
 
+	var matched = 0 
+	for org in orgs {
+		if chosen(org, opts.only) { matched += 1 }
+	}
+
+	if matched == 0 {
+		eprint("sync-repos: --only {opts.only}: no entry in {where.config} has that name")
+		return 2
+	}
+
 	let token = github.token(where.token) else |e| match e {
 		Exposed(why) => {
 			eprint("sync-repos: {why}")
@@ -180,6 +211,8 @@ fn main() -> int {
 	var total = report.empty()
 
 	for org in orgs {
+		if !chosen(org, opts.only) { continue }
+		
 		print("")
 		print("== {org.local_dir} <- {org.name}")
 		let repos = repos_of(org, token, color) else |e| match e {

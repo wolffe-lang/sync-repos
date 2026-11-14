@@ -1,0 +1,52 @@
+//! The command line: what the user asked of this run.
+
+/// One run's choices.
+pub struct Options {
+    /// Say what would be done and change nothing.
+    dry_run: bool,
+    /// Print the usage text and stop.
+    help: bool,
+    /// Sync only the entry with this local directory or organization.
+    /// `""` means every entry.
+    only: str,
+    /// Clone over SSH instead of HTTPS.
+    ssh: bool,
+}
+
+/// The text `--help` prints.
+pub fn usage() -> str {
+    var text = "usage: sync-repos [-n | --dry-run] [--only NAME] [-h | --help]\n"
+    text = text + "  -n, --dry-run   say what would be done; change nothing\n"
+    text = text + "  --only NAME     sync one entry, named by its directory or organization\n"
+    text = text + "  -h, --help      print this and stop\n"
+    text = text + "SYNC_REPOS_PROTOCOL=ssh clones over SSH; the default is https."
+    text
+}
+
+/// Read the arguments and the protocol setting (`""` when unset) into
+/// one value. Anything not understood is refused, with the reason.
+pub fn parse(args: List[str], protocol: str) -> Options ! {Usage(str)} {
+    var opts = Options { dry_run: false, help: false, only: "", ssh: false }
+    if protocol == "ssh" {
+        opts.ssh = true
+    } else if protocol != "" && protocol != "https" {
+        return Usage("SYNC_REPOS_PROTOCOL is `{protocol}`; it must be https or ssh")
+    }
+    var i = 0
+    while i < args.len {
+        let arg = args[i]
+        if arg == "-n" || arg == "--dry-run" {
+            opts.dry_run = true
+        } else if arg == "-h" || arg == "--help" {
+            opts.help = true
+        } else if arg == "--only" {
+            i += 1
+            if i >= args.len { return Usage("--only needs a name after it") }
+            opts.only = args[i]
+        } else {
+            return Usage("`{arg}` is not an option this program has")
+        }
+        i += 1
+    }
+    opts
+}
