@@ -1,11 +1,11 @@
-use std.x.tls.client
 use std.fs
 use conf
 use paths
 use git
+use http
 use checkout
 use report
-use secure
+
 
 
 /// How long one clone attempt or one pull may take
@@ -170,15 +170,20 @@ fn main() -> int {
 		return 1
 	}
 
-	var tls = secure.connect("api.github.com", 30000) else |e| match e {
-		Unavailable(why) => {
+	let page = http.get(
+		"api.github.com",
+		"/orgs/wolffe-lang/repos?per_page=3",
+		"",
+		30000,
+	) else |e| match e {
+		Failed(why) => {
 			eprint("sync-repos: {why}")
 			return 1
 		},
 	}
 
-	print("TLS handshake with api.github.com: done")
-	client.close(take tls) else |__| {}
+	let kind = page.headers["content-type"] else "(none)"
+	print("GET /orgs/wolffe-lang/repos: {page.status}, {kind}, {page.body.len} bytes")
 	
 	let color = report.color_wanted()
 	var total = report.empty()

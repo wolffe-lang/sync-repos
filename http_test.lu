@@ -1,0 +1,65 @@
+//! member: false
+//! HTTP responses, taken apart without a network.
+
+use http
+
+fn parsed(text: str) -> str {
+    let r = http.parse(text.bytes()) else |e| match e {
+        Malformed(why) => { return "refused: {why}" },
+    }
+    let body = str_from_utf8(r.body) else "(not text)"
+    "{r.status} [{r.headers["content-type"] else "-"}] {body}"
+}
+
+fn test_a_body_with_a_length() {
+    let got = parsed(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello",
+    )
+    assert(got == "200 [text/plain] hello", got)
+}
+
+fn test_header_names_are_folded_to_lower_case() {
+    let got = parsed("HTTP/1.1 404 Not Found\r\nCONTENT-TYPE:  a/b \r\n\r\n")
+    assert(got == "404 [a/b] ", got)
+}
+
+fn test_a_chunked_body_is_joined() {
+    let got = parsed(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwolf\r\n1;x=y\r\n!\r\n0\r\n\r\n",
+    )
+    assert(got == "200 [-] wolf!", got)
+}
+
+fn test_a_short_body_is_refused() {
+    let got = parsed("HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nhello")
+    assert(got == "refused: the body is 5 bytes, the header said 9", got)
+}
+
+fn test_not_http_is_refused() {
+    assert(
+        parsed("SSH-2.0-burrow\r\n\r\n") == "refused: `SSH-2.0-burrow` is not a status line",
+        parsed("SSH-2.0-burrow\r\n\r\n"),
+    )
+    assert(
+        parsed("HTTP/1.1 200 OK\r\n") == "refused: no blank line after the headers",
+        "no blank line",
+    )
+}
+
+fn test_hex() {
+    assert((http.hex("1f") else -1) == 31, "1f")
+    assert((http.hex("FF") else -1) == 255, "FF")
+    assert((http.hex("") else -1) == -1, "empty")
+    assert((http.hex("12g") else -1) == -1, "12g")
+}
+
+fn test_the_request() {
+    let text = http.request_text("api.example.invalid", "/orgs/acme/repos", "")
+    assert(text.starts_with("GET /orgs/acme/repos HTTP/1.1\r\nHost: api.example.invalid\r\n"), text)
+    assert(text.ends_with("Connection: close\r\n\r\n"), text)
+    assert(!text.contains("Authorization"), "a header for no token")
+    assert(
+        http.request_text("h", "/", "s3cret").contains("Authorization: Bearer s3cret\r\n"),
+        "no token header",
+    )
+}

@@ -1,0 +1,174 @@
+//! HTTP/1.1, just enough: one GET, one response, then the connection closes.
+
+use secure
+use std.x.tls.client
+
+/// A response, taken apart.
+pub struct Response {
+	/// The status code: 200, 404, ...
+	status: int,
+	/// Header names in lower case, each with its value.
+	headers: Map[str, str],
+	/// The body, with any chunked framing removed.
+	body: List[byte],
+}
+
+/// The text of a GET request for `path` on `host`. `token` may be empty.
+pub fn request_text(host: str, path: str, token: str) -> str {
+	var text = "GET {path} HTTP/1.1\r\n"
+	text = text + "Host: {host}\r\n"
+	text = text + "User-Agent: sync-repos\r\n"
+	text = text + "Accept: application/vnd.github+json\r\n"
+
+	if token != "" { text = text + "Authorization: Bearer {token}\r\n" }
+
+	text = text + "Connection: close\r\n\r\n"
+
+	text
+}
+
+/// Where `needle` first appears in `hay` at or after `from`.
+fn find(hay: List[byte], needle: List[byte], from: int) -> int ! {none} {
+	var i = from
+	while i + needle.len <= hay.len {
+		var j = 0
+		while j < needle.len && hay[i + j] == needle[j] { j += 1 }
+
+		if j == needle.len { return i }
+
+		i += 1
+	}
+
+	none
+}
+
+/// a hexadecimal number, as a chunk length is written.
+pub fn hex(text: str) -> int ! {none} {
+	if text == "" || text.len > 8 { return none }
+
+	var value = 0
+
+	for b in text.bytes() {
+		let c = b as int
+
+		let digit = if c >= 48 && c <= 57 {
+			c - 48
+		} else if c >= 97 && c <= 102 {
+			c - 87
+		} else if c >= 65 && c <= 70 {
+			c - 55
+		} else {
+			return none
+		}
+
+		value = value * 16 + digit
+	}
+
+	value
+}
+
+/// A body sent in chunks, joined: each chunk is a hexadecimal length, CRLF, 
+/// that many bytes, CRLF;  a zero length ends it.
+fn dechunk(raw: List[byte]) -> List[byte] ! {Malformed(str)} {
+	var out = List[byte]()
+	var at = 0
+
+	loop {
+		let end = find(raw, "\r\n".bytes(), at) else {
+			return Malformed("a chunk has no length line")
+		}
+
+		let line = str_from_utf8(raw[at..end]) else {
+			return Malformed("a chunk length is not text")
+		}
+
+		let (digits, _) = line.split_once(";") else (line, "")
+		let size = hex(digits.trim()) else { return Malformed("`{line}` is not a chunk length") }
+
+		at = end + 2
+
+		if size == 0 { break }
+		if size < 0 || at + size > raw.len { return Malformed("a chunk is cut short") }
+
+		for b in raw[at..at + size] { (mut out).push(b) }
+
+		at = at + size + 2
+	}	
+
+	out
+}
+
+/// Take a whole response, as the bytes that arrived, apart.
+pub fn parse(raw: List[byte]) -> Response ! {Malformed(str)} {
+	let split = find(raw, "\r\n\r\n".bytes(), 0) else {
+		return Malformed("no blank line after the headers")
+	}
+
+	let head = str_from_utf8(raw[0..split]) else { return Malformed("the headers are not text") }
+	let lines = head.split("\r\n")
+
+	let words = lines[0].split(" ")
+	if words.len < 2 || !words[0].starts_with("HTTP/1.") {
+		return Malformed("`{lines[0]}` is not a status line")
+	}
+
+	let status = words[1].to_int() else { return Malformed("`{words[1]}` is not a status code") }
+	var headers = Map[str, str]()
+
+	for line in lines[1..] {
+		let (name, value) = line.split_once(":") else {
+			return Malformed("`{line}` is not a header")
+		}
+
+		headers[name.trim().lower()] = value.trim()
+	}
+
+	let rest = raw[split + 4..]
+	let chunked = (headers["transfer-encoding"] else "").lower().contains("chunked")
+	let body = if chunked { dechunk(rest)? } else { rest }
+	let declared = headers["content-length"] else ""
+
+	if !chunked && declared != "" {
+		let want = declared.to_int() else { return Malformed("`{declared}` is not a length") }
+		if body.len != want {
+			return Malformed("the body is {body.len} bytes, the header said {want}")
+		} 
+	}
+
+	Response { status: status, headers: headers, body: body }
+}
+
+/// GET `https://host/path` and answer the parsed response.
+pub fn get(host: str, path: str, token: str, limit_ms: int) -> Response ! {Failed(str)} {
+	var tls = secure.connect(host, limit_ms) else |e| match e {
+		Unavailable(why) => { return Failed(why) },
+	}
+
+	client.write(mut tls, request_text(host, path, token).bytes()) else |e| {
+		client.close(take tls) else |_| {}
+		return Failed("could not send the request to {host} ({e})")
+	}
+
+	var raw = List[byte]()
+	var trouble = ""
+
+	loop {
+		let piece = client.read(mut tls) else |e| match e{
+			closed => { break },
+			timeout => { trouble = "{host} stopped answering"; break },
+			_ => { trouble = "the connection to {host} hroke ({e})"; break },
+		}
+
+		for b in piece { (mut raw).push(b) }
+
+		if raw.len > 33554432 { trouble = "the response from {host} is over 32 MiB"; break }
+	}
+
+	client.close(take tls) else |_| {}
+
+	if trouble != "" { return Failed(trouble) }
+
+	parse(raw) else |e| match e {
+		Malformed(why) => { return Failed("{host} sent a response that cannot be read: {why}") }
+	}
+}
