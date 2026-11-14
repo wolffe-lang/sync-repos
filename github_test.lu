@@ -2,6 +2,7 @@
 //! GitHub's repository list, read without a network.
 
 use github
+use http
 
 fn listed(page: str) -> str {
     let names = github.names(page) else |e| match e {
@@ -32,5 +33,105 @@ fn test_a_repository_without_a_name() {
     assert(
         listed("[{{\"id\": 7}}]") == "refused: a repository has no name",
         listed("[{{\"id\": 7}}]"),
+    )
+}
+
+/// A response with `status` and `body`, as a fake server would give it.
+fn answer(status: int, body: str) -> http.Response {
+    http.Response { status: status, headers: Map[str, str](), body: body.bytes() }
+}
+
+/// A page of `count` repositories named `PREFIX0`, `PREFIX1`, …
+fn page_of(prefix: str, count: int) -> str {
+    var text = "["
+    var i = 0
+    while i < count {
+        if i > 0 { text = text + "," }
+        text = text + "{{\"name\": \"{prefix}{i}\"}}"
+        i += 1
+    }
+    text + "]"
+}
+
+fn outcome(fetch: fn(str, str, str, int) -> http.Response ! {Failed(str)}, token: str) -> str {
+    let names = github.list_with(fetch, "acme", token) else |e| match e {
+        Failed(why) => { return "failed: {why}" },
+    }
+    "{names.len}: {names}"
+}
+
+/// An organization with two repositories.
+fn small_org(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    if path.starts_with("/orgs/acme/repos?") { return answer(200, page_of("r", 2)) }
+    answer(404, "")
+}
+
+fn test_one_short_page_is_the_whole_list() {
+    assert(outcome(small_org, "") == "2: [r0, r1]", outcome(small_org, ""))
+}
+
+/// 203 repositories: two full pages and a short one.
+fn big_org(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    if path.contains("&page=1&") { return answer(200, page_of("a", 100)) }
+    if path.contains("&page=2&") { return answer(200, page_of("b", 100)) }
+    if path.contains("&page=3&") { return answer(200, page_of("c", 3)) }
+    Failed("asked for a page past the end: {path}")
+}
+
+fn test_pages_are_followed_to_a_short_one() {
+    let got = github.list_with(big_org, "acme", "") else |e| match e {
+        Failed(why) => { assert(false, why); return },
+    }
+    assert(got.len == 203, "{got.len}")
+    assert(got[0] == "a0" && got[100] == "b0" && got[202] == "c2", "{got[0]} {got[100]} {got[202]}")
+}
+
+/// A user, not an organization. Answers the owner's repositories only
+/// when asked for `type=owner`; asked for `type=all` it includes a
+/// repository that belongs to someone else, as GitHub does.
+fn a_user(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    if path.starts_with("/orgs/") { return answer(404, "") }
+    if path.contains("type=owner") { return answer(200, page_of("mine", 1)) }
+    answer(200, "[{{\"name\": \"mine0\"}}, {{\"name\": \"someone-elses\"}}]")
+}
+
+fn test_a_user_is_found_after_the_organization_404() {
+    assert(outcome(a_user, "") == "1: [mine0]", outcome(a_user, ""))
+}
+
+/// A server that refuses everyone.
+fn forbidden(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    answer(403, "")
+}
+
+fn test_a_refusal_reads_differently_with_and_without_a_token() {
+    assert(outcome(forbidden, "").contains("without a token"), outcome(forbidden, ""))
+    assert(
+        outcome(forbidden, "t0ken").contains("may lack access to acme"),
+        outcome(forbidden, "t0ken"),
+    )
+    assert(!outcome(forbidden, "t0ken").contains("t0ken"), "the token is in the message")
+}
+
+/// No server at all.
+fn unplugged(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    Failed("cannot connect to {host}:443 (refused)")
+}
+
+fn test_a_network_failure_passes_through_unchanged() {
+    let got = outcome(unplugged, "")
+    assert(got == "failed: cannot connect to api.github.com:443 (refused)", got)
+}
+
+/// A server that answers 200 with something that is not a repository list.
+fn confused(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    answer(200, "{{\"message\": \"Moved\"}}")
+}
+
+fn test_a_wrong_document_names_the_account() {
+    let got = outcome(confused, "")
+    assert(
+        got == "failed: GitHub's answer for acme cannot be read: expected a list of repositories",
+        got,
     )
 }
