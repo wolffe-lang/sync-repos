@@ -7,6 +7,16 @@ fn test_defaults_hang_off_home() {
 	let p = paths.resolve("/home/you", "", "") else { assert(false, "refused"); return }
 	assert(p.config == "/home/you/.config/sync-repos/orgs.conf", p.config)
 	assert(p.root == "/home/you/GithubOrgs", p.root)
+	assert(p.token == "/home/you/.config/sync-repos/token", p.token)
+}
+
+fn test_the_token_sits_beside_the_config() {
+	let p = paths.resolve("/home/you", "/etc/sync/orgs.conf", "") else {
+		assert(false, "refused")
+		return
+	}
+
+	assert(p.token == "/etc/sync/token", p.token)
 }
 
 fn test_each_override_wins_alone() {

@@ -1,20 +1,29 @@
 //! Where things live: every path the program uses, decided once.
 
+use std.fs
+
 /// The places sync-repos reads and writes
 pub struct Paths {
 	/// The config file.
 	config: str,
 	/// The dictionary that holds one directory per organization.
 	root: str,
+	/// The file that may hold a Github token.
+	token: str,
 }
 
 /// Decide the paths from three settings, each `""` when unset: the home
-/// directory, an explicit config file, an explicit root.
+/// directory, an explicit config file, an explicit root. The token file
+/// sits beside the config.
 pub fn resolve(home: str, config: str, root: str) -> Paths ! {no_home} {
 	if home == "" && (config == "" || root == "") { return no_home }
+	let config_path = if config == "" { "{home}/.config/sync-repos/orgs.conf" } else { config }
+	let beside = fs.parent(config_path) else "."
+
 	Paths {
-		config: if config == "" { "{home}/.config/sync-repos/orgs.conf" } else { config },
+		config: config_path,
 		root: if root == "" { "{home}/GithubOrgs" } else { root },
+		token: "{beside}/token",
 	}
 }
 

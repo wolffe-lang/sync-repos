@@ -120,11 +120,11 @@ fn sync_org(
 
 /// The repositories to sync for `org`: the ones the config names, or, when
 /// it names none, every one GitHub lists.
-fn repos_of(org: conf.Org, colour: bool) -> List[str] ! {Failed(str)} {
+fn repos_of(org: conf.Org, token: str, color: bool) -> List[str] ! {Failed(str)} {
     if org.repos.len > 0 { return copy org.repos }
-    print(report.info("asking GitHub for {org.name}'s repositories...", colour))
-    let names = github.list(org.name, "")?
-    print(report.info("found {names.len}", colour))
+    print(report.info("asking GitHub for {org.name}'s repositories...", color))
+    let names = github.list(org.name, token)?
+    print(report.info("found {names.len}", color))
     names
 }
 
@@ -168,6 +168,13 @@ fn main() -> int {
 		eprint("sync-repos: {where.config} names no organizations")
 		return 1
 	}
+
+	let token = github.token(where.token) else |e| match e {
+		Exposed(why) => {
+			eprint("sync-repos: {why}")
+			return 1
+		},
+	}
 	
 	let color = report.color_wanted()
 	var total = report.empty()
@@ -175,7 +182,7 @@ fn main() -> int {
 	for org in orgs {
 		print("")
 		print("== {org.local_dir} <- {org.name}")
-		let repos = repos_of(org, color) else |e| match e {
+		let repos = repos_of(org, token, color) else |e| match e {
 			Failed(why) => {
 				print(report.bad("{org.name}: {why}", color))
 				total.failed += 1

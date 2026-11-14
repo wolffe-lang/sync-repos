@@ -1,6 +1,7 @@
 //! Github's REST API, one question: which repositories does this account have?
 
 use http
+use std.fs
 use std.json
 
 /// How many repositories to ask for at a time: the API's maximum.
@@ -76,4 +77,23 @@ pub fn list(account: str, token: str) -> List[str] ! {Failed(str)} {
         page += 1
     }
     all
+}
+
+/// The token in the file at `path`, or `""` when there is no such file.
+/// A file that anyone but its owner can red is refused, unread.
+pub fn token(path: str) -> str ! {Exposed(str)} {
+	let info = fs.stat(path) else |_| { return "" }
+
+	if info.mode % 64 != 0 {
+		return Exposed("{path} can be ready by other users; run: chmod 600 {path}")
+	}
+
+	let text = fs.read_text(path) else |_| { return Exposed("{path} cannot be read as text") }
+	let value = text.trim()
+
+	if value.contains(" ") || value.contains("\n") {
+		return Exposed("{path} should hold one token and nothing else")
+	}
+
+	value
 }
