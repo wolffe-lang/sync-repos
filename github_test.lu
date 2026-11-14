@@ -1,0 +1,36 @@
+//! member: false
+//! GitHub's repository list, read without a network.
+
+use github
+
+fn listed(page: str) -> str {
+    let names = github.names(page) else |e| match e {
+        Malformed(why) => { return "refused: {why}" },
+    }
+    "{names}"
+}
+
+fn test_names_in_order() {
+    let page = "[{{\"id\": 1, \"name\": \"alpha\", \"private\": false}}, {{\"name\": \"beta\"}}]"
+    assert(listed(page) == "[alpha, beta]", listed(page))
+}
+
+fn test_an_empty_page() {
+    assert(listed("[]") == "[]", listed("[]"))
+}
+
+fn test_an_error_document_is_refused() {
+    let got = listed("{{\"message\": \"Not Found\"}}")
+    assert(got == "refused: expected a list of repositories", got)
+}
+
+fn test_not_json_is_refused() {
+    assert(listed("<html>").starts_with("refused: not JSON"), listed("<html>"))
+}
+
+fn test_a_repository_without_a_name() {
+    assert(
+        listed("[{{\"id\": 7}}]") == "refused: a repository has no name",
+        listed("[{{\"id\": 7}}]"),
+    )
+}

@@ -1,0 +1,79 @@
+//! Github's REST API, one question: which repositories does this account have?
+
+use http
+use std.json
+
+/// How many repositories to ask for at a time: the API's maximum.
+const PER_PAGE: int = 100
+
+/// The API host: `$SYNC_REPOS_API`, else GitHub's.
+fn host() -> str {
+    let named = env_get("SYNC_REPOS_API") else ""
+    if named == "" { "api.github.com" } else { named }
+}
+
+/// The names in one page of the API's repository list.
+pub fn names(page: str) -> List[str] ! {Malformed(str)} {
+	let doc = json.parse(page) else |e| { return Malformed("not JSON ({e})") }
+	let items = json.as_arr(doc) else { return Malformed("expected a list of repositories") }
+	var out = List[str]()
+
+	for item in items {
+		let field = json.get(item, "name") else { return Malformed("a repository has no name") }
+		let name = json.as_str(field) else { return Malformed("a repository's name is not text") }
+		(mut out).push(name)
+	}
+
+	out
+}
+
+/// One page of `kind` (`orgs` or `users`) `account`'s repositories. An
+/// organization is asked for all of them; a user only for the ones they own,
+/// because a user's "all" includes other people's repositories they help with.
+fn page_of(kind: str, account: str, page: int, token: str) -> http.Response ! {Failed(str)} {
+    let which = if kind == "orgs" { "all" } else { "owner" }
+    let path = "/{kind}/{account}/repos?per_page={PER_PAGE}&page={page}&type={which}"
+    http.get(host(), path, token, 30000)
+}
+
+/// What a status other than 200 means, in words.
+fn explain(status: int, account: str, with_token: bool) -> str {
+    match status {
+        401 => "GitHub rejected the token (401); is it current?",
+        403 => if with_token {
+            "GitHub refused (403); the token may lack access to {account}, or the rate limit is spent"
+        } else {
+            "GitHub refused (403); without a token only 60 requests an hour are allowed"
+        },
+        404 => "GitHub knows no organization or user called {account} (404)",
+        _ => "GitHub answered {status} for {account}",
+    }
+}
+
+/// Every repository of `account`, which may be an organization or a user.
+/// `token` may be empty; then only public repositories are listed.
+pub fn list(account: str, token: str) -> List[str] ! {Failed(str)} {
+    var kind = "orgs"
+    var all = List[str]()
+    var page = 1
+    loop {
+        let response = page_of(kind, account, page, token)?
+        if response.status == 404 && kind == "orgs" && page == 1 {
+            kind = "users"
+            continue
+        }
+        if response.status != 200 { return Failed(explain(response.status, account, token != "")) }
+        let text = str_from_utf8(response.body) else {
+            return Failed("GitHub's answer is not text")
+        }
+        let found = names(text) else |e| match e {
+            Malformed(why) => {
+                return Failed("GitHub's answer for {account} cannot be read: {why}")
+            },
+        }
+        for name in found { (mut all).push(name) }
+        if found.len < PER_PAGE { break }
+        page += 1
+    }
+    all
+}
