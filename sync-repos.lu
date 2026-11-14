@@ -38,18 +38,56 @@ fn record(mut t: report.Tally, did: Did, name: str) {
 	}
 }
 
-/// Where an organization's repositories are cloned from.
-fn remote_of(org: str, repo: str) -> str {
+/// Where an organization's repositories are cloned from: an explicit base
+/// when one is set, else Github over the chosen protocol.
+fn remote_of(org: str, repo: str, ssh: bool) -> str {
 	let base = env_get("SYNC_REPOS_REMOTE") else ""
-	if base == "" { "https://github.com/{org}/{repo}.git" } else { "{base}/{org}/{repo}.git" }
+	if base != "" { return "{base}/{org}/{repo}.git" }
+	if ssh { "git@github.com:{org}/{repo}.git" } else { "https://github.com/{org}/{repo}.git"}
+}
+
+/// say what a real run would do with a repository in `state`, and which
+/// count that would add to. Changes nothing.
+fn preview(state: checkout.State, repo: str, url: str, color: bool) -> Did {
+	match state {
+		checkout.State.Foreign => {
+			print(report.warn("{repo} (exists but is not a git checkout, would skip)", color))
+			Did.Skipped
+		},
+		checkout.State.Broken => {
+			print(report.warn("{repo} (git cannot read it, would skip)", color))
+			Did.Skipped
+		},
+		checkout.State.Dirty => {
+			print(report.warn("{repo} (uncommitted changess, would skip)", color))
+			Did.Skipped
+		},
+		checkout.State.Clean => {
+			print(report.info("{repo} (would pull)", color))
+			Did.Nothing
+		},
+		checkout.State.Absent | checkout.State.Empty => {
+			print(report.info("{repo} (would clone {url})", color))
+			Did.Cloned
+		},
+	}
 }
 
 /// Bring one repository up to date, or say why it was left alone.
-fn sync_repo(org: str, repo: str, dir: str, color: bool) -> Did ! git.Failure {
+fn sync_repo(
+	org: str, 
+	repo: str, 
+	dir: str, 
+	opts: options.Options,
+	color: bool
+) -> Did ! git.Failure {
 	let path = "{dir}/{repo}"
+	let url = remote_of(org, repo, opts.ssh)
+	let state = checkout.inspect(path)?
+	if opts.dry_run { return preview(state, repo, url, color) }
 
-	match checkout.inspect(path)? {
-		checkout.State.Foreign => {
+	match state {
+		CHECKOUT.State.Foreign => {
 			print(report.warn("{repo} (exists but is not a git checkout, skipping)", color))
 			Did.Skipped
 		},
@@ -78,7 +116,7 @@ fn sync_repo(org: str, repo: str, dir: str, color: bool) -> Did ! git.Failure {
 		checkout.State.Absent | checkout.State.Empty => {
 			print(report.info("cloning {repo}...", color))
 
-			match checkout.clone(remote_of(org, repo), dir, repo, TRIES, SLOW_MS)? {
+			match checkout.clone(url, dir, repo, TRIES, SLOW_MS)? {
 				checkout.Cloned.Full => {
 					print(report.good("{repo} (cloned)", color))
 					Did.Cloned
@@ -101,16 +139,17 @@ fn sync_org(
 	org: conf.Org, 
 	repos: List[str],
 	root: str, 
+	opts: options.Options,
 	color: bool
 ) -> report.Tally ! git.Failure {
 	var tally = report.empty()
 	let dir = "{root}/{org.local_dir}"
 
-	fs.create_dir_all(dir) else |_| { return io }
+	if !opts.dry_run { fs.create_dir_all(dir) else |_| { return io } }
 
 	for repo in repos {
 		let did = region scratch {
-			sync_repo(org.name, repo, dir, color)?
+			sync_repo(org.name, repo, dir, opts, color)?
 		}
 
 		record(mut tally, did, "{org.name}/{repo}")
@@ -208,6 +247,7 @@ fn main() -> int {
 	}
 	
 	let color = report.color_wanted()
+	if opts.dry_run { print(report.info("dry run: nothing will be changed", color)) }
 	var total = report.empty()
 
 	for org in orgs {
@@ -225,7 +265,7 @@ fn main() -> int {
 			},
 		}
 
-		let part = sync_org(org, repos, where.root, color) else |e| match e {
+		let part = sync_org(org, repos, where.root, opts, color) else |e| match e {
 			not_found => {
 				eprint("sync-repos: cannot run git; is it installed and on PATH?")
 				return 1
@@ -244,7 +284,8 @@ fn main() -> int {
 	}
 
 	print("")
-	print("== done: {report.line(total)}")
+	let ending = if opts.dry_run { "a real run would give" } else { "done" }
+	print("== {ending}: {report.line(total)}")
 
 	for name in total.failures {
 		print("  failed: {name}")
