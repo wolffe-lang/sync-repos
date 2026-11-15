@@ -62,3 +62,47 @@ fn test_refusals_name_the_line() {
 fn test_a_trailing_colon_is_an_empty_name() {
 	assert(refusal("a=b:") == "line 1: the repository name is empty", refusal("a=b:"))
 }
+
+/// Each entry of `text` as `LOCAL_DIR@IDENTITY`, in order.
+fn identities(text: str) -> str {
+    let orgs = conf.parse(text) else |e| match e {
+        Malformed(why) => { return "refused: {why}" },
+    }
+    var out = ""
+    for o in orgs {
+        if out != "" { out = out + " " }
+        out = out + "{o.local_dir}@{o.identity}"
+    }
+    out
+}
+
+fn test_entries_before_any_header_are_the_default_identity() {
+    assert(identities("a=b\nc=d\n") == "a@default c@default", identities("a=b\nc=d\n"))
+}
+
+fn test_a_header_names_the_identity_of_what_follows() {
+    let text = "a=b\n[work]\nc=d\ne=f:g\n\n# play\n[ alt ]\nh=i\n"
+    assert(identities(text) == "a@default c@work e@work h@alt", identities(text))
+}
+
+fn test_a_default_header_goes_back() {
+    let text = "[work]\na=b\n[default]\nc=d\n"
+    assert(identities(text) == "a@work c@default", identities(text))
+}
+
+fn test_a_header_that_cannot_be_read_names_the_line() {
+    assert(
+        identities("a=b\n[work\n") ==
+            "refused: line 2: a header is [NAME], with nothing after the `]`",
+        identities("a=b\n[work\n"),
+    )
+    assert(identities("[]") == "refused: line 1: the identity is empty", identities("[]"))
+    assert(
+        identities("[a/b]") == "refused: line 1: the identity `a/b` has a `/` in it",
+        identities("[a/b]"),
+    )
+    assert(
+        identities("[my work]") == "refused: line 1: the identity `my work` has a space in it",
+        identities("[my work]"),
+    )
+}

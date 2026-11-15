@@ -1,5 +1,6 @@
 //! Where things live: every path the program uses, decided once.
 
+use conf
 use std.fs
 
 /// The places sync-repos reads and writes
@@ -8,13 +9,15 @@ pub struct Paths {
 	config: str,
 	/// The dictionary that holds one directory per organization.
 	root: str,
-	/// The file that may hold a Github token.
+    /// The file that may hold the default identity's GitHub token.
 	token: str,
+	/// The directory that may hold one token file per named identity.
+	tokens: str,
 }
 
 /// Decide the paths from three settings, each `""` when unset: the home
 /// directory, an explicit config file, an explicit root. The token file
-/// sits beside the config.
+/// and the tokens directory sit beside the config.
 pub fn resolve(home: str, config: str, root: str) -> Paths ! {no_home} {
 	if home == "" && (config == "" || root == "") { return no_home }
 	let config_path = if config == "" { "{home}/.config/sync-repos/orgs.conf" } else { config }
@@ -24,7 +27,14 @@ pub fn resolve(home: str, config: str, root: str) -> Paths ! {no_home} {
 		config: config_path,
 		root: if root == "" { "{home}/GithubOrgs" } else { root },
 		token: "{beside}/token",
+		tokens: "{beside}/tokens",
 	}
+}
+
+/// The file that may hold identity `name`'s token: the one token file for
+/// the default identity, `tokens/NAME` for any other.
+pub fn token_file(where: Paths, name: str) -> str {
+    if name == conf.DEFAULT { where.token } else { "{where.tokens}/{name}" }
 }
 
 /// The paths this process should use: `$SYNC_REPOS_CONFIG` and 

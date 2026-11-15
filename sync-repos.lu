@@ -4,6 +4,7 @@ use conf
 use paths
 use git
 use github
+use identity
 use options
 use checkout
 use report
@@ -174,10 +175,28 @@ fn sync_org(
 	tally
 }
 
+/// The line that opens an entry's part of the output. A named identity is
+/// shown; the default one is not, so a config with no headers prints what
+/// it always printed.
+fn heading(org: conf.Org) -> str {
+    if org.identity == conf.DEFAULT {
+        "== {org.local_dir} <- {org.name}"
+    } else {
+        "== {org.local_dir} <- {org.name} [{org.identity}]"
+    }
+}
+
 /// The repositories to sync for `org`: the ones the config names, or, when
 /// it names none, every one GitHub lists.
 fn repos_of(org: conf.Org, token: str, color: bool) -> List[str] ! {Failed(str)} {
     if org.repos.len > 0 { return copy org.repos }
+
+    if token == "" && org.identity != conf.DEFAULT {
+    	print(
+    		report.warn("[{org.identity}] has no tokem; listing public repositories only", color),
+    	)
+    }
+    
     print(report.info("asking GitHub for {org.name}'s repositories...", color))
     let names = github.list(org.name, token)?
     print(report.info("found {names.len}", color))
@@ -244,17 +263,17 @@ fn main() -> int {
 		return 1
 	}
 
-	var matched = 0 
+	var picked = List[conf.Org]()
 	for org in orgs {
-		if chosen(org, opts.only) { matched += 1 }
+		if chosen(org, opts.only) { (mut picked).push(org) }
 	}
 
-	if matched == 0 {
+	if picked.len == 0 {
 		eprint("sync-repos: --only {opts.only}: no entry in {where.config} has that name")
 		return 2
 	}
 
-	let token = github.token(where.token) else |e| match e {
+	let tokens = identity.tokens(identity.used(picked), where) else |e| match e {
 		Exposed(why) => {
 			eprint("sync-repos: {why}")
 			return 1
@@ -265,12 +284,12 @@ fn main() -> int {
 	if opts.dry_run { print(report.info("dry run: nothing will be changed", color)) }
 	var total = report.empty()
 
-	for org in orgs {
+	for org in picked {
 		if !chosen(org, opts.only) { continue }
 		
 		print("")
-		print("== {org.local_dir} <- {org.name}")
-		let repos = repos_of(org, token, color) else |e| match e {
+		print(heading(org))
+		let repos = repos_of(org, tokens[org.identity] else "", color) else |e| match e {
 			Failed(why) => {
 				print(report.bad("{org.name}: {why}", color))
 				total.failed += 1

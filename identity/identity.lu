@@ -1,0 +1,41 @@
+//! Identities: who the program acts as for an entry, and the token each
+//! one sends.
+
+use conf
+use github
+use paths
+use std.fs
+
+/// The identities `orgs` use, each once, in the order they first appear.
+pub fn used(orgs: List[conf.Org]) -> List[str] {
+    var names = List[str]()
+    for org in orgs {
+        var seen = false
+        for name in names {
+            if name == org.identity { seen = true }
+        }
+        if !seen { (mut names).push(org.identity) }
+    }
+    names
+}
+
+/// Refuse a tokens directory that anyone but its owner can enter, list or
+/// write to. A directory that is not there is fine: it holds no tokens.
+fn closed(dir: str) -> () ! {Exposed(str)} {
+    let info = fs.stat(dir) else |_| { return }
+    if info.mode % 64 != 0 {
+        return Exposed("{dir} is open to other users; run: chmod 700 {dir}")
+    }
+}
+
+/// The token of each identity in `names`, by name. An identity with no
+/// token file has `""`. Every file is held to chapter 11's rule, and so is
+/// the directory the named ones live in.
+pub fn tokens(names: List[str], where: paths.Paths) -> Map[str, str] ! {Exposed(str)} {
+    var held = Map[str, str]()
+    for name in names {
+        if name != conf.DEFAULT { closed(where.tokens)? }
+        held[name] = github.token(paths.token_file(where, name))?
+    }
+    held
+}

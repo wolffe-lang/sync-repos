@@ -8,7 +8,13 @@ pub struct Org {
 	name: str,
 	/// The repositories to sync. Empty means "ask Github for all of them"
 	repos: List[str],
+	/// Which identity this entry is synced as: the `[NAME]` header it sits
+	/// under, or `DEFAULT` when it sits under none.
+	identity: str,
 }
+
+/// The identity of entries that come before any `[NAME]` HEADER.
+pub const DEFAULT: str = "default"
 
 /// A name that becomes one path segment: not empty, no slash, not `.` or `..`.
 fn segment(what: str, name: str) -> str ! {Malformed(str)} {
@@ -37,13 +43,29 @@ pub fn parse_entry(entry: str) -> Org ! {Malformed(str)} {
 		}
 	}
 
-	Org { local_dir: local_dir, name: name, repos: repos }
+	Org { local_dir: local_dir, name: name, repos: repos, identity: DEFAULT }
 }
 
-/// Read a whole config. Blank lines and `#` comments are skipped; the first
-/// entry that cannot be read ends the parse, with its line number.
+/// Read a header line, `[NAME]`, and answer the name. The caller has
+/// already seen that the line starts with `[`.
+fn header(line: str) -> str ! {Malformed(str)} {
+	if !line.ends_with("]") {
+		return Malformed("a header is [NAME], with nothing after the `]`")
+	}
+
+	let name = line[1..line.len - 1].trim()
+
+	if name.contains(" ") { return Malformed("the identity `{name}` has a space in it") }
+
+	segment("identity", name)
+}
+
+/// Read a whole config. Blank lines and `#` comments are skipped. A
+/// `[NAME]` line makes NAME the identity of the entries after it. The first
+/// line that cannot be read ends the parse, with its line number.
 pub fn parse(text: str) -> List[Org] ! {Malformed(str)} {
 	var orgs = List[Org]()
+	var identity = DEFAULT
 	var number = 0
 
 	for line in text.lines() {
@@ -52,9 +74,19 @@ pub fn parse(text: str) -> List[Org] ! {Malformed(str)} {
 
 		if entry == "" || entry.starts_with("#") { continue }
 
-		let org = parse_entry(entry) else |e| match e {
-			Malformed(why) => { return Malformed("line {number}: {why}") }
+		if entry.starts_with("[") {
+			identity = header(entry) else |e| match e {
+				Malformed(why) => { return Malformed("line {number}: {why}") },
+			}
+
+			continue
 		}
+
+		var org = parse_entry(entry) else |e| match e{
+			Malformed(why) => { return Malformed("line {number}: {why}") },
+		}
+
+		org.identity = identity
 
 		(mut orgs).push(org)
 	}

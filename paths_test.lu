@@ -1,6 +1,7 @@
 //! member: false
 //! Path decisions, without touching the environment.
 
+use conf
 use paths
 
 fn test_defaults_hang_off_home() {
@@ -40,4 +41,24 @@ fn test_no_home_is_fine_when_nothing_needs_it() {
 fn test_no_home_is_refused_when_something_needs_it() {
     let p = paths.resolve("", "/etc/orgs.conf", "") else { return }
     assert(false, "accepted, with root {p.root}")
+}
+
+fn test_a_named_identity_has_a_file_of_its_own() {
+    let p = paths.resolve("/home/you", "", "") else { assert(false, "refused"); return }
+    assert(
+        paths.token_file(p, conf.DEFAULT) == "/home/you/.config/sync-repos/token",
+        paths.token_file(p, conf.DEFAULT),
+    )
+    assert(
+        paths.token_file(p, "work") == "/home/you/.config/sync-repos/tokens/work",
+        paths.token_file(p, "work"),
+    )
+}
+
+fn test_the_tokens_directory_follows_the_config_too() {
+    let p = paths.resolve("", "/etc/sync/orgs.conf", "/srv/orgs") else {
+        assert(false, "refused")
+        return
+    }
+    assert(paths.token_file(p, "work") == "/etc/sync/tokens/work", paths.token_file(p, "work"))
 }
