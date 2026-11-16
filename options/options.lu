@@ -11,13 +11,16 @@ pub struct Options {
     only: str,
     /// Clone over SSH instead of HTTPS.
     ssh: bool,
+    /// Say which account each identity's token belongs to, and stop.
+    who: bool,
 }
 
 /// The text `--help` prints.
 pub fn usage() -> str {
-    var text = "usage: sync-repos [-n | --dry-run] [--only NAME] [-h | --help]\n"
+    var text = "usage: sync-repos [-n | --dry-run] [--only NAME] [--who] [-h | --help]\n"
     text = text + "  -n, --dry-run   say what would be done; change nothing\n"
     text = text + "  --only NAME     sync one entry, named by its directory or organization\n"
+    text = text + "  --who           say which account each identity's token belongs to, and stop\n"
     text = text + "  -h, --help      print this and stop\n"
     text = text + "SYNC_REPOS_PROTOCOL=ssh clones over SSH; the default is https."
     text
@@ -26,7 +29,7 @@ pub fn usage() -> str {
 /// Read the arguments and the protocol setting (`""` when unset) into
 /// one value. Anything not understood is refused, with the reason.
 pub fn parse(args: List[str], protocol: str) -> Options ! {Usage(str)} {
-    var opts = Options { dry_run: false, help: false, only: "", ssh: false }
+    var opts = Options { dry_run: false, help: false, only: "", ssh: false, who: false }
     if protocol == "ssh" {
         opts.ssh = true
     } else if protocol != "" && protocol != "https" {
@@ -39,6 +42,8 @@ pub fn parse(args: List[str], protocol: str) -> Options ! {Usage(str)} {
             opts.dry_run = true
         } else if arg == "-h" || arg == "--help" {
             opts.help = true
+        } else if arg == "--who" {
+            opts.who = true
         } else if arg == "--only" {
             i += 1
             if i >= args.len { return Usage("--only needs a name after it") }

@@ -44,3 +44,16 @@ fn test_the_protocol_setting() {
     let got = shown(List[str](), "ftp")
     assert(got == "refused: SYNC_REPOS_PROTOCOL is `ftp`; it must be https or ssh", got)
 }
+
+fn test_who_is_a_flag_of_its_own() {
+    let o = options.parse(["--who", "--only", "wolf"], "") else {
+        assert(false, "refused")
+        return
+    }
+    assert(o.who && o.only == "wolf" && !o.dry_run, "who={o.who} only={o.only} dry={o.dry_run}")
+    let plain = options.parse(List[str](), "") else {
+        assert(false, "refused")
+        return
+    }
+    assert(!plain.who, "who is set with no arguments")
+}
