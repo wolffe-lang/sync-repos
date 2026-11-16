@@ -39,3 +39,9 @@ pub fn tokens(names: List[str], where: paths.Paths) -> Map[str, str] ! {Exposed(
     }
     held
 }
+/// The host an SSH clone names for identity `name`: GitHub itself for the
+/// default identity, and for any other the alias `github-NAME`, which
+/// `~/.ssh/config` maps to github.com and that identity's key.
+pub fn ssh_host(name: str) -> str {
+    if name == conf.DEFAULT { "github.com" } else { "github-{name}" }
+}

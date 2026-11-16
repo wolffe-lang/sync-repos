@@ -23,3 +23,8 @@ fn test_each_identity_is_named_once_in_first_seen_order() {
 fn test_a_header_with_no_entries_is_not_used() {
     assert(used("a=b\n[work]\n") == "[default]", used("a=b\n[work]\n"))
 }
+
+fn test_a_named_identity_clones_through_its_own_host_alias() {
+    assert(identity.ssh_host(conf.DEFAULT) == "github.com", identity.ssh_host(conf.DEFAULT))
+    assert(identity.ssh_host("work") == "github-work", identity.ssh_host("work"))
+}
