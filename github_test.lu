@@ -151,3 +151,118 @@ fn test_what_is_listed_depends_on_whose_token_asks() {
     assert(outcome(two_views, "tok-alt") == "1: [site]", outcome(two_views, "tok-alt"))
     assert(outcome(two_views, "") == "1: [site]", outcome(two_views, ""))
 }
+
+fn test_a_message_is_tamed_before_it_is_printed() {
+    assert(github.tame("plain words", "") == "plain words", github.tame("plain words", ""))
+    let dressed = github.tame("  red\x1b[31m alert\r\nsecond line\t", "")
+    assert(dressed == "red [31m alert  second line", dressed)
+    let leaked = github.tame("no such token: t0ken, try again", "t0ken")
+    assert(leaked == "no such token: [token], try again", leaked)
+}
+
+fn test_a_long_message_is_cut() {
+    var long = ""
+    var i = 0
+    while i < 40 {
+        long = long + "0123456789"
+        i += 1
+    }
+    let cut = github.tame(long, "")
+    assert(cut.chars().len == 301 && cut.ends_with("…"), "{cut.chars().len} characters")
+}
+
+fn test_githubs_own_message_is_read_from_an_error_body() {
+    let body = "{{\"message\": \"Bad credentials\", \"status\": \"401\"}}"
+    assert(github.said(body.bytes(), "") == "Bad credentials", github.said(body.bytes(), ""))
+    assert(github.said("<html>".bytes(), "") == "", github.said("<html>".bytes(), ""))
+    assert(github.said("[]".bytes(), "") == "", github.said("[]".bytes(), ""))
+    assert(github.said("{{\"message\": 7}}".bytes(), "") == "", "a number is not a message")
+}
+
+/// An organization that forbids the token it is shown, and says why.
+fn strict_org(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    var body = "{{\"message\": \"`acme` forbids access via a fine-grained personal access "
+    body = body + "tokens if the token's lifetime is greater than 366 days.\", "
+    body = body + "\"documentation_url\": \"https://docs.github.com/\", \"status\": \"403\"}}"
+    answer(403, body)
+}
+
+fn test_a_refusal_carries_githubs_own_words() {
+    let got = outcome(strict_org, "t0ken")
+    let want = "failed: GitHub answered 403: `acme` forbids access via a fine-grained " +
+        "personal access tokens if the token's lifetime is greater than 366 days."
+    assert(got == want, got)
+}
+
+/// A server that repeats the token it was sent in its complaint.
+fn parrot(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    answer(401, "{{\"message\": \"Bad credentials: {token}\"}}")
+}
+
+fn test_a_token_echoed_by_the_server_is_not_printed() {
+    let got = outcome(parrot, "t0ken")
+    assert(got == "failed: GitHub answered 401: Bad credentials: [token]", got)
+}
+
+fn whose(fetch: fn(str, str, str, int) -> http.Response ! {Failed(str)}, token: str) -> str {
+    github.login_with(fetch, token) else |e| match e {
+        Failed(why) => "failed: {why}",
+    }
+}
+
+/// GitHub as two tokens see it. `tok-mona` belongs to the user `Mona`, who
+/// has a public and a private repository; `tok-acme` belongs to `hubot`.
+/// Asked for `/users/mona/repos`, it shows the public one to anybody.
+fn accounts(host: str, path: str, token: str, limit_ms: int) -> http.Response ! {Failed(str)} {
+    if path == "/user" {
+        if token == "tok-mona" { return answer(200, "{{\"login\": \"Mona\", \"id\": 1}}") }
+        if token == "tok-acme" { return answer(200, "{{\"login\": \"hubot\", \"id\": 2}}") }
+        return answer(401, "{{\"message\": \"Bad credentials\"}}")
+    }
+    if path.starts_with("/orgs/") { return answer(404, "{{\"message\": \"Not Found\"}}") }
+    if path.starts_with("/user/repos?") && path.contains("affiliation=owner") {
+        if token == "tok-mona" {
+            return answer(200, "[{{\"name\": \"dotfiles\"}}, {{\"name\": \"diary\"}}]")
+        }
+        return Failed("asked for {path} as someone who is not mona")
+    }
+    if path.starts_with("/users/mona/repos?") { return answer(200, "[{{\"name\": \"dotfiles\"}}]") }
+    answer(404, "{{\"message\": \"Not Found\"}}")
+}
+
+fn mine(token: str) -> str {
+    let names = github.list_with(accounts, "mona", token) else |e| match e {
+        Failed(why) => { return "failed: {why}" },
+    }
+    "{names}"
+}
+
+fn test_a_token_can_be_asked_whose_it_is() {
+    assert(whose(accounts, "tok-mona") == "Mona", whose(accounts, "tok-mona"))
+    assert(whose(accounts, "tok-acme") == "hubot", whose(accounts, "tok-acme"))
+}
+
+fn test_a_token_github_does_not_know_is_refused_in_githubs_words() {
+    let got = whose(accounts, "t0ken")
+    assert(got == "failed: GitHub answered 401: Bad credentials", got)
+}
+
+fn test_an_answer_with_no_login_is_refused() {
+    assert(
+        whose(confused, "t0ken") == "failed: GitHub's answer names no account",
+        whose(confused, "t0ken"),
+    )
+}
+
+fn test_your_own_account_lists_its_private_repositories() {
+    assert(mine("tok-mona") == "[dotfiles, diary]", mine("tok-mona"))
+}
+
+fn test_someone_elses_account_lists_only_what_is_public() {
+    assert(mine("tok-acme") == "[dotfiles]", mine("tok-acme"))
+    assert(mine("") == "[dotfiles]", mine(""))
+}
+
+fn test_a_bad_token_fails_the_listing_of_a_user() {
+    assert(mine("t0ken") == "failed: GitHub answered 401: Bad credentials", mine("t0ken"))
+}

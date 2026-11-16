@@ -28,17 +28,55 @@ pub fn names(page: str) -> List[str] ! {Malformed(str)} {
 	out
 }
 
-/// The path of one page of `kind` (`orgs` or `users`) `account`'s
-/// repositories. An organization is asked for all of them; a user only for
-/// the ones they own, because a user's "all" includes other people's
-/// repositories they help with.
+/// The path of one page of `account`'s repositories. `kind` is `orgs`,
+/// `users`, or `user` for the account the token itself belongs to. An
+/// organization is asked for all of them; a user only for the ones they
+/// own, because a user's "all" includes other people's repositories they
+/// help with. Only the `user` form shows a personal account's private
+/// repositories, and it names no account: the token says whose they are.
 fn page_path(kind: str, account: str, page: int) -> str {
+    if kind == "user" { return "/user/repos?per_page={PER_PAGE}&page={page}&affiliation=owner" }
     let which = if kind == "orgs" { "all" } else { "owner" }
     "/{kind}/{account}/repos?per_page={PER_PAGE}&page={page}&type={which}"
 }
 
-/// What a status other than 200 means, in words.
-fn explain(status: int, account: str, with_token: bool) -> str {
+/// The longest message from GitHub this program will print, in characters.
+const SAID_MAX: int = 300
+
+/// Text from a server, made safe to print on a terminal: `secret` (when
+/// there is one) is blanked wherever it appears, every control character
+/// becomes a space, and anything past `SAID_MAX` characters is cut.
+pub fn tame(text: str, secret: str) -> str {
+    let hidden = if secret == "" { text } else { text.replace(secret, "[token]") }
+    var out = ""
+    var kept = 0
+    for c in hidden.chars() {
+        if kept == SAID_MAX {
+            out = out + "…"
+            break
+        }
+        let code = c as int
+        out = out + if code < 32 || code == 127 { ' ' } else { c }
+        kept += 1
+    }
+    out.trim()
+}
+
+/// What GitHub itself says went wrong: the `message` of an error body,
+/// tamed. `""` when the body has none.
+pub fn said(body: List[byte], secret: str) -> str {
+    let text = str_from_utf8(body) else { return "" }
+    let doc = json.parse(text) else |_| { return "" }
+    let field = json.get(doc, "message") else { return "" }
+    let message = json.as_str(field) else { return "" }
+    tame(message, secret)
+}
+
+/// What a status other than 200 means, in words. `said` is GitHub's own
+/// message, or `""`; when GitHub explained itself, its words are used.
+fn explain(status: int, account: str, with_token: bool, said: str) -> str {
+    if status == 404 { return "GitHub knows no organization or user called {account} (404)" }
+    if said != "" { return "GitHub answered {status}: {said}" }
     match status {
         401 => "GitHub rejected the token (401); is it current?",
         403 => if with_token {
@@ -46,9 +84,31 @@ fn explain(status: int, account: str, with_token: bool) -> str {
         } else {
             "GitHub refused (403); without a token only 60 requests an hour are allowed"
         },
-        404 => "GitHub knows no organization or user called {account} (404)",
         _ => "GitHub answered {status} for {account}",
     }
+}
+
+/// The account `token` belongs to: its login name on GitHub.
+pub fn login(token: str) -> str ! {Failed(str)} {
+    login_with(http.get, token)
+}
+
+/// `login`, asking through `fetch` instead of the network.
+pub fn login_with(
+    fetch: fn(str, str, str, int) -> http.Response ! {Failed(str)},
+    token: str,
+) -> str ! {Failed(str)} {
+    let response = fetch(host(), "/user", token, 30000)?
+    if response.status != 200 {
+        let words = said(response.body, token)
+        if words != "" { return Failed("GitHub answered {response.status}: {words}") }
+        return Failed("GitHub answered {response.status} when asked whose the token is")
+    }
+    let text = str_from_utf8(response.body) else { return Failed("GitHub's answer is not text") }
+    let doc = json.parse(text) else |e| { return Failed("GitHub's answer is not JSON ({e})") }
+    let field = json.get(doc, "login") else { return Failed("GitHub's answer names no account") }
+    let name = json.as_str(field) else { return Failed("GitHub's answer names no account") }
+    tame(name, token)
 }
 
 /// Every repository of `account`, which may be an organization or a user.
@@ -71,9 +131,13 @@ pub fn list_with(
         let response = fetch(host(), page_path(kind, account, page), token, 30000)?
         if response.status == 404 && kind == "orgs" && page == 1 {
             kind = "users"
+            if token != "" && login_with(fetch, token)?.lower() == account.lower() { kind = "user" }
             continue
         }
-        if response.status != 200 { return Failed(explain(response.status, account, token != "")) }
+        if response.status != 200 {
+            let words = said(response.body, token)
+            return Failed(explain(response.status, account, token != "", words))
+        }
         let text = str_from_utf8(response.body) else {
             return Failed("GitHub's answer is not text")
         }
