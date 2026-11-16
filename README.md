@@ -17,10 +17,39 @@ GitHub's API over HTTPS, and the cloning and pulling is done by `git` (on PAX,
     # or name the repositories and skip the listing
     mine=someone:dotfiles,notes
 
-Repositories land under `~/GithubOrgs/<local directory>/`. See
-`orgs.conf.example`.
+Repositories land under `~/GithubOrgs/<local directory>/`. An item such as
+`dotfiles>dots` gives its checkout the directory `dots`; the repository keeps
+its own name on GitHub. See `orgs.conf.example`.
 
-## Status
+A `[work]` header makes the following entries use the token in
+`~/.config/sync-repos/tokens/work`. Entries before any header use
+`~/.config/sync-repos/token`; `[default]` goes back to that identity. Tokens
+are optional for public repositories. Token files must have mode 600, and
+the `tokens` directory mode 700. `./sync-repos --who` checks whose token each
+identity has and lists its entries without syncing.
 
-Nothing is built yet. The program is written by following a guide, one
-chapter at a time.
+`SYNC_REPOS_CONFIG` overrides the config path; token files sit beside it.
+`GITHUB_ORGS_DIR` overrides the checkout root. `SYNC_REPOS_PROTOCOL=ssh`
+clones over SSH instead of HTTPS: the default identity uses `github.com`,
+and a named identity uses the host alias `github-NAME`, which must be set up
+with its key in `~/.ssh/config`. HTTPS clones use git's own authentication;
+the tokens here are for the API listing.
+
+## Build and run
+
+The finished source is through chapter 19 of the guide.
+
+```sh
+wolf build sync-repos.lu
+wolf test
+sh ./check.sh
+./sync-repos --dry-run
+./sync-repos
+```
+
+`--only NAME` selects one entry by its local directory or organization.
+Dirty checkouts and checkouts that cannot fast-forward are left alone, as
+are repositories already checked out under another name. Submodules are
+updated after a successful clone or pull. A local git question may take up
+to 10 minutes; each clone attempt, pull or submodule update may take up to
+30 minutes.
