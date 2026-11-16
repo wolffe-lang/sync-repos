@@ -106,3 +106,91 @@ fn test_a_header_that_cannot_be_read_names_the_line() {
         identities("[my work]"),
     )
 }
+
+/// Each listed repository of a one-line config as `REPO@DIR`, or the refusal.
+fn locals(text: str) -> str {
+    let orgs = conf.parse(text) else |e| match e {
+        Malformed(why) => { return "refused: {why}" },
+    }
+    var out = ""
+    for repo in orgs[0].repos {
+        if out != "" { out = out + " " }
+        out = out + "{repo}@{conf.local_name(orgs[0], repo)}"
+    }
+    out
+}
+
+fn test_an_item_can_name_its_directory() {
+    let got = locals("lab=acme:alpha>a, beta ,gamma > g\n")
+    assert(got == "alpha@a beta@beta gamma@g", got)
+}
+
+fn test_a_config_without_renames_means_what_it_meant() {
+    assert(locals("lab=acme:alpha,beta") == "alpha@alpha beta@beta", locals("lab=acme:alpha,beta"))
+    assert(locals("lab=acme") == "", locals("lab=acme"))
+}
+
+fn test_a_rename_under_a_header_keeps_its_identity() {
+    let orgs = conf.parse("[work]\nlab=acme:alpha>a\n") else {
+        assert(false, "refused")
+        return
+    }
+    assert(orgs[0].identity == "work", orgs[0].identity)
+    assert(conf.local_name(orgs[0], "alpha") == "a", conf.local_name(orgs[0], "alpha"))
+}
+
+fn test_an_empty_side_is_refused() {
+    assert(
+        locals("x=y\nlab=acme:alpha>") == "refused: line 2: the local name for `alpha` is empty",
+        locals("x=y\nlab=acme:alpha>"),
+    )
+    assert(
+        locals("lab=acme:>a") == "refused: line 1: the repository name is empty",
+        locals("lab=acme:>a"),
+    )
+}
+
+fn test_a_second_arrow_is_refused() {
+    assert(
+        locals("lab=acme:alpha>a>b") == "refused: line 1: `alpha>a>b` has more than one `>`",
+        locals("lab=acme:alpha>a>b"),
+    )
+}
+
+fn test_a_local_name_is_one_plain_name() {
+    assert(
+        locals("lab=acme:alpha>x/y") == "refused: line 1: the local name `x/y` has a `/` in it",
+        locals("lab=acme:alpha>x/y"),
+    )
+    assert(
+        locals("lab=acme:alpha>..") == "refused: line 1: the local name `..` starts with `.`",
+        locals("lab=acme:alpha>.."),
+    )
+    assert(
+        locals("lab=acme:alpha>.a") == "refused: line 1: the local name `.a` starts with `.`",
+        locals("lab=acme:alpha>.a"),
+    )
+    assert(
+        locals("lab=acme:alpha>-n") == "refused: line 1: the local name `-n` starts with `-`",
+        locals("lab=acme:alpha>-n"),
+    )
+}
+
+fn test_two_repositories_cannot_share_a_directory() {
+    assert(
+        locals("lab=acme:alpha>a,beta>a") == "refused: line 1: the local name `a` is given twice",
+        locals("lab=acme:alpha>a,beta>a"),
+    )
+    assert(
+        locals("lab=acme:alpha>beta,beta>b") ==
+            "refused: line 1: `alpha>beta`: `beta` is a repository in this list",
+        locals("lab=acme:alpha>beta,beta>b"),
+    )
+}
+
+fn test_a_repository_listed_twice_is_refused() {
+    assert(
+        locals("lab=acme:alpha,alpha>a") == "refused: line 1: `alpha` is listed twice",
+        locals("lab=acme:alpha,alpha>a"),
+    )
+}

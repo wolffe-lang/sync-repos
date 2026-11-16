@@ -160,3 +160,48 @@ pub fn clone(url: str, parent: str, name: str, tries: int, limit_ms: int) -> Clo
 
 	Cloned.GaveUp
 }
+/// A checkout in an organization's directory that no listed repository
+/// will use, and the URL it was cloned from.
+pub struct Stray {
+	dir: str,
+	origin: str,
+}
+
+/// The checkouts in `parent` whose names are not in `taken`, each with the
+/// URL of its `origin` remote. Reads only. A `parent` that does not exist
+/// holds none.
+pub fn strays(parent: str, taken: List[str]) -> List[Stray] ! git.Failure {
+	let names = fs.read_dir(parent) else |_| { return List[Stray]() }
+	var found = List[Stray]()
+	for name in names {
+		var listed = false
+		for t in taken {
+			if t == name { listed = true }
+		}
+		if listed || !fs.exists("{parent}/{name}/.git") { continue }
+		let ran = git.run("{parent}/{name}", ["config", "--get", "remote.origin.url"], QUICK_MS)?
+		if ran.code == 0 { (mut found).push(Stray { dir: name, origin: ran.out }) }
+	}
+	found
+}
+
+/// Whether `url` is a clone URL of `owner`'s repository `repo`, in any of
+/// the forms a clone URL takes (`https://github.com/OWNER/REPO.git`,
+/// `git@github-work:OWNER/REPO.git`, `file:///…/OWNER/REPO.git`), with or
+/// without the `.git`. GitHub ignores case in names, and so does this.
+pub fn names_repo(url: str, owner: str, repo: str) -> bool {
+	let u = url.lower()
+	let bare = if u.ends_with(".git") { u[0..u.len - 4] } else { u }
+	let want = "{owner}/{repo}".lower()
+	bare.ends_with("/" + want) || bare.ends_with(":" + want)
+}
+
+/// The directory among `strays` that holds a checkout of `owner`'s `repo`,
+/// or `""` when none does.
+pub fn elsewhere(strays: List[Stray], owner: str, repo: str) -> str {
+	for s in strays {
+		if names_repo(s.origin, owner, repo) { return s.dir }
+	}
+	""
+}
+

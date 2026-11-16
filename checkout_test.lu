@@ -27,3 +27,31 @@ fn test_an_unfetched_or_moved_submodule_is_stale() {
 	assert(checkout.stale("-3f2a9c1 vendor/lib"), "never fetched")
 	assert(checkout.stale(" 3f2a9c1 vendor/a (v1)\n+77b0e2d vendor/b (v2-3-g77b0e2d)"), "moved")
 }
+
+fn test_every_form_of_clone_url_names_its_repository() {
+	assert(checkout.names_repo("https://github.com/acme/alpha.git", "acme", "alpha"), "https")
+	assert(checkout.names_repo("git@github-work:acme/alpha.git", "acme", "alpha"), "an alias")
+	assert(checkout.names_repo("file:///srv/remote/acme/alpha.git", "acme", "alpha"), "file")
+	assert(checkout.names_repo("https://github.com/Acme/Alpha", "acme", "alpha"), "case, no .git")
+}
+
+fn test_a_url_of_another_repository_does_not() {
+	assert(!checkout.names_repo("https://github.com/acme/alpha2.git", "acme", "alpha"), "alpha2")
+	assert(!checkout.names_repo("https://github.com/xacme/alpha.git", "acme", "alpha"), "xacme")
+	assert(!checkout.names_repo("git@github.com:other/alpha.git", "acme", "alpha"), "other")
+	assert(!checkout.names_repo("", "acme", "alpha"), "no origin")
+}
+
+fn test_a_checkout_is_found_under_another_name() {
+	var strays = List[checkout.Stray]()
+	(mut strays).push(checkout.Stray { dir: "notes", origin: "git@github.com:me/notes.git" })
+	(mut strays).push(checkout.Stray { dir: "a", origin: "file:///r/acme/alpha.git" })
+	assert(
+		checkout.elsewhere(strays, "acme", "alpha") == "a",
+		checkout.elsewhere(strays, "acme", "alpha"),
+	)
+	assert(
+		checkout.elsewhere(strays, "acme", "beta") == "",
+		checkout.elsewhere(strays, "acme", "beta"),
+	)
+}

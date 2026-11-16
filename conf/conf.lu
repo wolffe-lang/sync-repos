@@ -11,6 +11,10 @@ pub struct Org {
 	/// Which identity this entry is synced as: the `[NAME]` header it sits
 	/// under, or `DEFAULT` when it sits under none.
 	identity: str,
+	/// The repositories the list gives a directory name of their own
+	/// (`alpha>a`), each with that name. A repository not in it is checked
+	/// out under its own name.
+	dirs: Map[str, str],
 }
 
 /// The identity of entries that come before any `[NAME]` HEADER.
@@ -25,8 +29,53 @@ fn segment(what: str, name: str) -> str ! {Malformed(str)} {
 	name
 }
 
-/// Read one entry, `LOCAL_DIR=ORG` or `LOCAL_DIR=ORG:repo1,repo2`.
-/// The caller has already dropped blank lines and comments.
+/// The name a list gives a repository's directory: one path segment, not
+/// hidden, and not something `git clone` would read as an option.
+fn local(repo: str, name: str) -> str ! {Malformed(str)} {
+	if name == "" { return Malformed("the local name for `{repo}` is empty") }
+	if name.contains("/") { return Malformed("the local name `{name}` has a `/` in it") }
+	if name.starts_with(".") { return Malformed("the local name `{name}` starts with `.`") }
+	if name.starts_with("-") { return Malformed("the local name `{name}` starts with `-`") }
+	name
+}
+
+/// One item of a repository list, `REPO` or `REPO>DIR`, as the repository
+/// and the name of the directory it is checked out in.
+fn item(text: str) -> (str, str) ! {Malformed(str)} {
+	let (left, right) = text.split_once(">") else {
+		let repo = segment("repository name", text)?
+		return (repo, repo)
+	}
+	if right.contains(">") { return Malformed("`{text}` has more than one `>`") }
+	let repo = segment("repository name", left.trim())?
+	(repo, local(repo, right.trim())?)
+}
+
+/// Whether `name` is one of `names`.
+fn listed(names: List[str], name: str) -> bool {
+	for n in names {
+		if n == name { return true }
+	}
+	false
+}
+
+/// Refuse a local name that is another listed repository's own name, or
+/// that two repositories are given.
+fn unshared(repos: List[str], dirs: Map[str, str]) -> () ! {Malformed(str)} {
+	var given = List[str]()
+	for repo in repos {
+		let dir = dirs[repo] else { continue }
+		if listed(repos, dir) {
+			return Malformed("`{repo}>{dir}`: `{dir}` is a repository in this list")
+		}
+		if listed(given, dir) { return Malformed("the local name `{dir}` is given twice") }
+		(mut given).push(dir)
+	}
+}
+
+/// Read one entry, `LOCAL_DIR=ORG` or `LOCAL_DIR=ORG:repo1,repo2`, where
+/// a repository may be written `REPO>DIR` to give its directory a name of
+/// its own. The caller has already dropped blank lines and comments.
 pub fn parse_entry(entry: str) -> Org ! {Malformed(str)} {
 	let (left, right) = entry.split_once("=") else {
 		return Malformed("no `=`; an entry is LOCAL_DIR=ORG")
@@ -36,14 +85,25 @@ pub fn parse_entry(entry: str) -> Org ! {Malformed(str)} {
 	let (org, list) = right.split_once(":") else (right, "")
 	let name = segment("organization", org.trim())?
 	var repos = List[str]()
+	var dirs = Map[str, str]()
 
 	if right.contains(":") {
 		for piece in list.split(",") {
-			(mut repos).push(segment("repository name", piece.trim())?)
+			let (repo, dir) = item(piece.trim())?
+			if listed(repos, repo) { return Malformed("`{repo}` is listed twice") }
+			(mut repos).push(repo)
+			if dir != repo { dirs[repo] = dir }
 		}
+		unshared(repos, dirs)?
 	}
 
-	Org { local_dir: local_dir, name: name, repos: repos, identity: DEFAULT }
+	Org { local_dir: local_dir, name: name, repos: repos, identity: DEFAULT, dirs: dirs }
+}
+
+/// The name of the directory `repo` of `org` is checked out in: the one
+/// the list gives it, or its own.
+pub fn local_name(org: Org, repo: str) -> str {
+	org.dirs[repo] else repo
 }
 
 /// Read a header line, `[NAME]`, and answer the name. The caller has
