@@ -54,7 +54,7 @@ pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 	for a in args { process.push_arg(mut command, a) } 
 
 	var pipe = process.pipe()?
-	var null = fs.open_mode("/dev/null", 2) else |_| return { io }
+	var null = fs.open_mode("/dev/null", 2) else |_| { return io }
 
 	process.set_stdin(mut command, null)
 	process.set_stdout(mut command, pipe.write)
