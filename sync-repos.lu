@@ -10,7 +10,7 @@ use checkout
 use report
 
 /// How long one clone attempt or one pull may take
-const SLOW_MS: int = 300000
+const SLOW_MS: int = 1800000
 
 /// How many times a clone is tried.
 const TRIES: int = 3
@@ -39,12 +39,17 @@ fn record(mut t: report.Tally, did: Did, name: str) {
 	}
 }
 
-/// Where an organization's repositories are cloned from: an explicit base
-/// when one is set, else Github over the chosen protocol.
-fn remote_of(org: str, repo: str, ssh: bool) -> str {
+/// Where an entry's repositories are cloned from: an explicit base when
+/// one is set, else Github over the chosen protocol. Over SSH the host is
+/// the entry's identity's, so the clone is made as that identity.
+fn remote_of(org: conf.Org, repo: str, ssh: bool) -> str {
 	let base = env_get("SYNC_REPOS_REMOTE") else ""
-	if base != "" { return "{base}/{org}/{repo}.git" }
-	if ssh { "git@github.com:{org}/{repo}.git" } else { "https://github.com/{org}/{repo}.git"}
+	if base != "" { return "{base}/{org.name}/{repo}.git" }
+	if ssh {
+		"git@{identity.ssh_host(org.identity)}:{org.name}/{repo}.git"
+	} else {
+		"https://github.com/{org.name}/{repo}.git"
+	}
 }
 
 /// say what a real run would do with a repository in `state`, and which
@@ -85,64 +90,88 @@ fn tend(path: str, repo: str, color: bool) -> () ! git.Failure {
 	}
 }
 
-/// Bring one repository up to date, or say why it was left alone.
+/// How a repository is named in what the program prints: its own name,
+/// and after an arrow the name of its directory when the list gave it one.
+fn label(repo: str, local: str) -> str {
+	if local == repo { repo } else { "{repo} → {local}" }
+}
+
+/// Bring one repository up to date, print what happened, and say which
+/// count it belongs to. Its directory is the one `conf.local_name` gives.
 fn sync_repo(
-	org: str, 
+	org: conf.Org, 
 	repo: str, 
 	dir: str, 
+	strays: List[checkout.Stray],
 	opts: options.Options,
 	color: bool
 ) -> Did ! git.Failure {
-	let path = "{dir}/{repo}"
+	let local = conf.local_name(org, repo)
+	let path = "{dir}/{local}"
 	let url = remote_of(org, repo, opts.ssh)
+	let shown = label(repo, local)
 	let state = checkout.inspect(path)?
-	if opts.dry_run { return preview(state, repo, url, color) }
+	let moved = match state {
+		checkout.State.Absent | checkout.State.Empty => checkout.elsewhere(strays, org.name, repo),
+		_ => "",
+	}
+	if moved != "" {
+		let undo = if moved == repo { "remove the rename" } else { "list it as {repo}>{moved}" }
+		print(
+			report.warn(
+				"{shown} (already checked out as {moved}; move it to {local}, or {undo})",
+				color,
+			),
+		)
+		return Did.Skipped
+	}
+	if opts.dry_run { return preview(state, shown, url, color) }
 
 	match state {
-		CHECKOUT.State.Foreign => {
-			print(report.warn("{repo} (exists but is not a git checkout, skipping)", color))
+		checkout.State.Foreign => {
+			print(report.warn("{shown} (exists but is not a git checkout, skipping)", color))
 			Did.Skipped
 		},
 		checkout.State.Broken => {
-			print(report.warn("{repo} (git cannot read it, skipping)", color))
+			print(report.warn("{shown} (git cannot read it, skipping)", color))
 			Did.Skipped
 		},
 		checkout.State.Dirty => {
-			print(report.warn("{repo} (uncommitted changes, skipping)", color))
+			print(report.warn("{shown} (uncommitted changes, skipping)", color))
 			Did.Skipped
 		},
 		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
 			checkout.Pulled.UpToDate => {
-				print(report.good("{repo} (up to date)", color))
-				tend(path, repo, color)?
+				print(report.good("{shown} (up to date)", color))
+				tend(path, shown, color)?
 				Did.Nothing
 			}, 
 			checkout.Pulled.Updated => {
-				print(report.good("{repo} (updated)", color))
-				tend(path, repo, color)?
+				print(report.good("{shown} (updated)", color))
+				tend(path, shown, color)?
 				Did.Updated
 			},
 			checkout.Pulled.Refused => {
-				print(report.warn("{repo} (cannot fast-forward, skipping)", color))
+				print(report.warn("{shown} (cannot fast-forward, skipping)", color))
 				Did.Skipped
 			},
 		},
 		checkout.State.Absent | checkout.State.Empty => {
-			print(report.info("cloning {repo}...", color))
+			print(report.info("cloning {shown}...", color))
 
-			match checkout.clone(url, dir, repo, TRIES, SLOW_MS)? {
+			match checkout.clone(url, dir, local, TRIES, SLOW_MS)? {
 				checkout.Cloned.Full => {
-					print(report.good("{repo} (cloned)", color))
-					tend(path, repo, color)?
+					print(report.good("{shown} (cloned)", color))
+					tend(path, shown, color)?
 					Did.Cloned
 				},
 				checkout.Cloned.Shallow => {
-					print(report.good("{repo} (cloned shallow)", color))
-					tend(path, repo, color)?
+					print(report.good("{shown} (cloned shallow)", color))
+					tend(path, shown, color)?
 					Did.Cloned
 				},
 				checkout.Cloned.GaveUp => {
-					print(report.bad("{repo} (clone failed after {TRIES} attempts)", color))
+					print(report.bad("{shown} (clone failed after {TRIES} attempts)", color))
 					Did.Failed
 				},
 			}
@@ -163,9 +192,13 @@ fn sync_org(
 
 	if !opts.dry_run { fs.create_dir_all(dir) else |_| { return io } }
 
+	var taken = List[str]()
+	for repo in repos { (mut taken).push(conf.local_name(org, repo)) }
+	let strays = checkout.strays(dir, taken)?
+
 	for repo in repos {
 		let did = region scratch {
-			sync_repo(org.name, repo, dir, opts, color)?
+			sync_repo(org, repo, dir, strays, opts, color)?
 		}
 
 		record(mut tally, did, "{org.name}/{repo}")
@@ -201,6 +234,42 @@ fn repos_of(org: conf.Org, token: str, color: bool) -> List[str] ! {Failed(str)}
     let names = github.list(org.name, token)?
     print(report.info("found {names.len}", color))
     names
+}
+
+/// Say who each identity is on GitHub and which entries it syncs, and
+/// answer the exit status: 1 when a token was refused or could not be
+/// checked, else 0. Syncs nothing.
+fn who(
+	orgs: List[conf.Org],
+	tokens: Map[str, str],
+	where: paths.Paths,
+	ssh: bool,
+	color: bool,
+) -> int {
+	var refused = 0
+	for name in identity.used(orgs) {
+		let file = paths.token_file(where, name)
+		let token = tokens[name] else ""
+		if token == "" {
+			print(report.warn("[{name}] has no token at {file}: public repositories only", color))
+		} else {
+			let account = github.login(token) else |e| match e {
+				Failed(why) => {
+					refused += 1
+					print(report.bad("[{name}] {why} (token: {file})", color))
+					""
+				},
+			}
+			if account != "" {
+				print(report.good("[{name}] is {account} on GitHub (token: {file})", color))
+			}
+		}
+		if ssh { print("    clones as git@{identity.ssh_host(name)}") }
+		for org in orgs {
+			if org.identity == name { print("    {org.local_dir} <- {org.name}") }
+		}
+	}
+	if refused > 0 { 1 } else { 0 }
 }
 
 /// Whether `--only NAME` lets this entry through. No name lets all through.
@@ -281,12 +350,11 @@ fn main() -> int {
 	}
 	
 	let color = report.color_wanted()
+	if opts.who { return who(picked, tokens, where, opts.ssh, color) }
 	if opts.dry_run { print(report.info("dry run: nothing will be changed", color)) }
 	var total = report.empty()
 
 	for org in picked {
-		if !chosen(org, opts.only) { continue }
-		
 		print("")
 		print(heading(org))
 		let repos = repos_of(org, tokens[org.identity] else "", color) else |e| match e {
