@@ -59,3 +59,39 @@ fn test_a_diff_that_cannot_answer_is_unchecked() {
 	let got = inspected(checkout_dir("refuses"))
 	assert(got == "State.Unchecked", got)
 }
+
+/// How `checkout.pull` of the checkout at `path` ends, with `limit_ms`.
+fn pulled(path: str, limit_ms: int) -> str {
+	let got = checkout.pull(path, limit_ms) else |e| match e {
+		not_found => { return "git not found" },
+		timeout => { return "ran out of time" },
+		io => { return "io" },
+	}
+	"{got}"
+}
+
+/// How `checkout.submodules` of the checkout at `path` ends, with `limit_ms`.
+fn tended(path: str, limit_ms: int) -> str {
+	let got = checkout.submodules(path, limit_ms) else |e| match e {
+		not_found => { return "git not found" },
+		timeout => { return "ran out of time" },
+		io => { return "io" },
+	}
+	"{got}"
+}
+
+fn test_a_pull_past_its_limit_fails_that_checkout_alone() {
+	// A pull that does not end in time is that checkout's failure, named as
+	// such, not a question nobody answered: the run goes on to the next.
+	stand_in("git-slow-pull", "case $1 in {HEAD_LINE} pull) sleep 5 ;; esac")
+	let got = pulled(checkout_dir("slow-pull"), 1000)
+	assert(got == "Pulled.TimedOut", got)
+}
+
+fn test_a_submodule_update_past_its_limit_says_so() {
+	let dir = checkout_dir("slow-submodules")
+	fs.write_text("{dir}/.gitmodules", "[submodule \"lib\"]\n\tpath = lib\n\turl = ../lib\n") else |_| {}
+	stand_in("git-slow-update", "case $1$2 in submodulestatus) echo '-0123456 lib' ;; submoduleupdate) sleep 5 ;; esac")
+	let got = tended(dir, 1000)
+	assert(got == "Subs.TimedOut", got)
+}
