@@ -64,6 +64,10 @@ fn preview(state: checkout.State, repo: str, url: str, color: bool) -> Did {
 			print(report.warn("{repo} (git cannot read it, would skip)", color))
 			Did.Skipped
 		},
+		checkout.State.Unchecked => {
+			print(report.warn("{repo} (git could not check it for changes, would skip)", color))
+			Did.Skipped
+		},
 		checkout.State.Dirty => {
 			print(report.warn("{repo} (uncommitted changess, would skip)", color))
 			Did.Skipped
@@ -134,6 +138,10 @@ fn sync_repo(
 		},
 		checkout.State.Broken => {
 			print(report.warn("{shown} (git cannot read it, skipping)", color))
+			Did.Skipped
+		},
+		checkout.State.Unchecked => {
+			print(report.warn("{shown} (git could not check it for changes, skipping)", color))
 			Did.Skipped
 		},
 		checkout.State.Dirty => {

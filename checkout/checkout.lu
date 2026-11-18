@@ -14,6 +14,9 @@ pub enum State {
 	Foreign,
 	/// It has a `.git` but git cannot read a commit from it.
 	Broken,
+	/// git read its commit but could not say whether it has changes: a
+	/// `diff --quiet` that exited with neither 0 (none) nor 1 (some).
+	Unchecked,
 	/// A checkout with staged or unstaged changes.
 	Dirty,
 	/// A checkout with nothing to lose.
@@ -97,6 +100,9 @@ pub fn inspect(path: str) -> State ! git.Failure {
 
 	let unstaged = git.run(path, ["diff", "--quiet"], QUICK_MS)?
 	let staged = git.run(path, ["diff", "--cached", "--quiet"], QUICK_MS)?
+	if unstaged.code > 1 || unstaged.code < 0 || staged.code > 1 || staged.code < 0 {
+		return State.Unchecked
+	}
 	if unstaged.code != 0 || staged.code != 0 { return State.Dirty }
 
 	State.Clean
