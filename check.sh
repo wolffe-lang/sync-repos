@@ -3,7 +3,8 @@
 # what it prints, and what it leaves on disk, with what it should.
 # Needs git. Touches nothing outside one new directory, which it removes.
 # Parts 5 to 7 are about identities, and use no network and no real key.
-# Part 8 is about local names for clones.
+# Part 8 is about local names for clones; part 9 about a diff git cannot
+# answer.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -193,5 +194,20 @@ got=$("$prog" | grep beta)
 expect "an added rename leaves the checkout where it is" \
     "⚠ beta → b (already checked out as beta; move it to b, or remove the rename)" "$got"
 expect "and neither made a second copy" "a beta" "$(echo $(ls "$work/renamed/acme"))"
+
+# 9. A diff git cannot answer is not taken for uncommitted changes. A
+#    stand-in passes every command to git but `diff`, which refuses.
+mkdir -p "$work/refusing"
+real_git=$(command -v git)
+cat > "$work/refusing/git" <<EOF
+#!/bin/sh
+[ "\$1" = diff ] && { echo 'not yet implemented: diff attributes' >&2; exit 2; }
+exec "$real_git" "\$@"
+EOF
+chmod +x "$work/refusing/git"
+printf 'acme=acme:alpha>a\n' > "$work/orgs.conf"
+got=$(SYNC_REPOS_GIT="$work/refusing/git" "$prog" | grep alpha)
+expect "a diff with no answer is not called uncommitted changes" \
+    "⚠ alpha → a (git could not check it for changes, skipping)" "$got"
 
 if [ "$fails" -eq 0 ]; then echo "check: all passed"; else echo "check: $fails failed"; exit 1; fi
