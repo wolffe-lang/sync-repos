@@ -1,5 +1,6 @@
 //! Running git: one child process at a time, with a time limit.
 
+use std.bytes
 use std.fs
 use std.env
 use std.process
@@ -11,7 +12,7 @@ pub error Failure = {not_found, timeout, io}
 pub struct Ran {
 	/// The exit status: 0 is success.
 	code: int,
-	/// What it wrote to standard output, at most a few lines.
+	/// What it wrote to standard output.
 	out: str,
 }
 
@@ -21,14 +22,24 @@ fn program() -> str {
 	if named == "" { "git" } else { named }
 }
 
-/// Wait for `child` to end, looking every 20 ms, for at most `limit_ms`.
-fn wait_within(take child: process.Child, limit_ms: int) -> int ! {timeout, io} {
+/// Wait for `child` to end, looking every 20 ms, for at most `limit_ms`,
+/// moving what it writes to `from` into `kept` as it goes. A child that
+/// writes more than a pipe holds waits for room; it gets it here, while it
+/// runs, not once it has ended (which it never would).
+fn wait_within(
+	take child: process.Child,
+	mut from: fs.File,
+	mut kept: List[byte],
+	limit_ms: int,
+) -> int ! {timeout, io} {
 	var child = child
 	let deadline = time_now_ms() + limit_ms
 
 	loop {
+		let moved = drain(mut from, mut kept)
 		let change = process.poll()?
 		if change.changed && change.child.slot == child.slot {
+			drain(mut from, mut kept)
 			return process.shell_code(change.status)
 		}
 
@@ -39,8 +50,21 @@ fn wait_within(take child: process.Child, limit_ms: int) -> int ! {timeout, io} 
 			return timeout
 		}
 
-		time_sleep_ms(20)
+		if moved == 0 { time_sleep_ms(20) }
 	}
+}
+
+/// Move every byte `from` holds now into `kept`, and say how many. `from`
+/// does not wait: a read with nothing to give ends the drain, as does the
+/// end of the pipe.
+fn drain(mut from: fs.File, mut kept: List[byte]) -> int {
+	var moved = 0
+	loop {
+		let piece = fs.read_chunk(mut from, 65536) else { break }
+		for b in piece { (mut kept).push(b) }
+		moved += piece.len
+	}
+	moved
 }
 
 /// Run `git ARGS` in directory `dir`, keeping what it prints, for at most `limit_ms`.
@@ -54,6 +78,7 @@ pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 	for a in args { process.push_arg(mut command, a) } 
 
 	var pipe = process.pipe()?
+	fs.set_nonblock(mut pipe.read, true) else |_| { return io }
 	var null = fs.open_mode("/dev/null", 2) else |_| { return io }
 
 	process.set_stdin(mut command, null)
@@ -69,13 +94,9 @@ pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 	fs.close(take null) else |_| {}
 	defer fs.close(take pipe.read) else |_| {}
 
-	let code = wait_within(take child, limit_ms)?
-	var out = ""
-
-	loop {
-		let piece = fs.read(mut pipe.read, 4096) else { break }
-		out = out + piece
-	}
+	var kept = List[byte]()
+	let code = wait_within(take child, mut pipe.read, mut kept, limit_ms)?
+	let out = bytes.to_str(kept) else ""
 
 	Ran { code: code, out: out.trim() }
 }
