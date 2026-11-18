@@ -49,7 +49,10 @@ sh ./check.sh
 
 `--only NAME` selects one entry by its local directory or organization.
 Dirty checkouts and checkouts that cannot fast-forward are left alone, as
-are repositories already checked out under another name. Submodules are
-updated after a successful clone or pull. A local git question may take up
-to 10 minutes; each clone attempt, pull or submodule update may take up to
-30 minutes.
+are repositories already checked out under another name, and checkouts git
+could not check for changes (a `diff --quiet` that exits with neither 0 nor
+1). Submodules are updated after a successful clone or pull. A local git
+question may take up to 10 minutes; one that takes longer ends the run,
+naming the command and the checkout. Each clone attempt, pull or submodule
+update may take up to 30 minutes; a pull or submodule update that takes
+longer counts as that repository's failure, and the run goes on.
