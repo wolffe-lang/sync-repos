@@ -1,0 +1,43 @@
+//! member: false
+//! Running git: what the child prints comes back whole, however much it is.
+
+use git
+use std.env
+use std.fs
+
+/// A stand-in for git under the temporary directory: a script that prints
+/// `lines` lines of 50 bytes each, then exits 0. Returns its path.
+fn stand_in(name: str, lines: int) -> str {
+	let tmp = env.get("TMPDIR") else "/tmp"
+	let dir = "{tmp}/sync-repos-git-test-{env.pid()}"
+	fs.create_dir_all(dir) else |_| {}
+	let path = "{dir}/{name}"
+	let script = "#!/bin/sh\nawk 'BEGIN {{ for (i = 0; i < {lines}; i++) printf \"%049d\\n\", i }}'\n"
+	fs.write_text(path, script) else |_| {}
+	fs.set_mode(path, 0o755) else |_| {}
+	path
+}
+
+/// Run the stand-in `name` as git with a ten-second limit, and say how it went.
+fn ran_as_git(name: str, lines: int) -> str {
+	env.set("SYNC_REPOS_GIT", stand_in(name, lines)) else |_| {}
+	let ran = git.run(".", ["pull"], 10000) else |e| match e {
+		not_found => { return "git not found" },
+		timeout => { return "ran out of time" },
+		io => { return "io" },
+	}
+	"exit {ran.code}, {ran.out.len} bytes"
+}
+
+fn test_a_few_lines_come_back() {
+	let got = ran_as_git("quiet-git", 2)
+	assert(got == "exit 0, 99 bytes", got)
+}
+
+fn test_more_than_a_pipe_holds_comes_back_whole() {
+	// 2000 lines of 50 bytes: 100,000 bytes, more than the 64 KiB a pipe
+	// holds on Linux and on PAX. A parent that reads only once the child has
+	// ended leaves the child waiting for room in the pipe until its time is up.
+	let got = ran_as_git("loud-git", 2000)
+	assert(got == "exit 0, 99999 bytes", got)
+}
