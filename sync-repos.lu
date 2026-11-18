@@ -84,14 +84,21 @@ fn preview(state: checkout.State, repo: str, url: str, color: bool) -> Did {
 }
 
 /// Look after the submodules of a checkout that was just cloned or pulled, 
-/// and say so when there was anything to do. A failure here is a warning:
-/// the repository itself is in place.
-fn tend(path: str, repo: str, color: bool) -> () ! git.Failure {
+/// and say so when there was anything to do. A failed update is a warning:
+/// the repository itself is in place. An update that ran past its limit
+/// fails the repository: the answer is true then.
+fn tend(path: str, repo: str, color: bool) -> bool ! git.Failure {
 	match checkout.submodules(path, SLOW_MS)? {
 		checkout.Subs.None | checkout.Subs.Current => {},
 		checkout.Subs.Updated => { print(report.good("  {repo}: submodules updated", color)) },
 		checkout.Subs.Failed => { print(report.warn("  {repo}: submodule update failed", color)) } ,
+		checkout.Subs.TimedOut => {
+			let limit = checkout.in_words(SLOW_MS)
+			print(report.bad("  {repo}: git submodule update --init --recursive did not finish in {limit}", color))
+			return true
+		},
 	}
+	false
 }
 
 /// How a repository is named in what the program prints: its own name,
@@ -151,17 +158,20 @@ fn sync_repo(
 		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
 			checkout.Pulled.UpToDate => {
 				print(report.good("{shown} (up to date)", color))
-				tend(path, shown, color)?
-				Did.Nothing
+				if tend(path, shown, color)? { Did.Failed } else { Did.Nothing }
 			}, 
 			checkout.Pulled.Updated => {
 				print(report.good("{shown} (updated)", color))
-				tend(path, shown, color)?
-				Did.Updated
+				if tend(path, shown, color)? { Did.Failed } else { Did.Updated }
 			},
 			checkout.Pulled.Refused => {
 				print(report.warn("{shown} (cannot fast-forward, skipping)", color))
 				Did.Skipped
+			},
+			checkout.Pulled.TimedOut => {
+				let limit = checkout.in_words(SLOW_MS)
+				print(report.bad("{shown} (git pull --ff-only did not finish in {limit})", color))
+				Did.Failed
 			},
 		},
 		checkout.State.Absent | checkout.State.Empty => {
@@ -170,13 +180,11 @@ fn sync_repo(
 			match checkout.clone(url, dir, local, TRIES, SLOW_MS)? {
 				checkout.Cloned.Full => {
 					print(report.good("{shown} (cloned)", color))
-					tend(path, shown, color)?
-					Did.Cloned
+					if tend(path, shown, color)? { Did.Failed } else { Did.Cloned }
 				},
 				checkout.Cloned.Shallow => {
 					print(report.good("{shown} (cloned shallow)", color))
-					tend(path, shown, color)?
-					Did.Cloned
+					if tend(path, shown, color)? { Did.Failed } else { Did.Cloned }
 				},
 				checkout.Cloned.GaveUp => {
 					print(report.bad("{shown} (clone failed after {TRIES} attempts)", color))

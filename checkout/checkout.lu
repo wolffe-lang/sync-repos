@@ -31,8 +31,10 @@ pub enum Subs {
     Current,
     /// At least one was fetched or moved.
     Updated,
-    /// git could not report on them, or the update failed or ran out of time.
+    /// git could not report on them, or the update failed.
     Failed,
+    /// The update did not finish within its limit.
+    TimedOut,
 }
 
 /// Whether `git submodule status` output shows work to do: a line that
@@ -48,7 +50,7 @@ pub fn stale(status: str) -> bool {
 /// records. Does nothing, and runs nothing, when there is no `.gitmodules`.
 pub fn submodules(path: str, limit_ms: int) -> Subs ! git.Failure {
     if !fs.exists("{path}/.gitmodules") { return Subs.None }
-    let status = git.run(path, ["submodule", "status", "--recursive"], QUICK_MS)?
+    let status = asked(path, ["submodule", "status", "--recursive"])?
     if status.code != 0 { return Subs.Failed }
     if !stale(status.out) { return Subs.Current }
     let ran = git.run(
@@ -57,7 +59,7 @@ pub fn submodules(path: str, limit_ms: int) -> Subs ! git.Failure {
         limit_ms,
     ) else |e| match e {
         not_found => { return not_found },
-        timeout => { git.Ran { code: 124, out: "" } },
+        timeout => { return Subs.TimedOut },
         io => { return io },
     }
     if ran.code == 0 { Subs.Updated } else { Subs.Failed }
@@ -72,6 +74,8 @@ pub enum Pulled {
 	/// The branch and its upstream have each moved, or there is no
 	/// upstream: nothing was changed.
 	Refused,
+	/// The pull did not finish within its limit and was stopped.
+	TimedOut,
 }
 
 /// How a clone ended.
@@ -87,6 +91,31 @@ pub enum Cloned {
 /// How long a quick local git command may take.
 const QUICK_MS: int = 600000
 
+/// `limit_ms` in words, for a message.
+pub fn in_words(limit_ms: int) -> str {
+	if limit_ms % 60000 == 0 {
+		let m = limit_ms / 60000
+		return if m == 1 { "1 minute" } else { "{m} minutes" }
+	}
+	"{limit_ms / 1000} seconds"
+}
+
+/// Ask git a quick local question in the checkout at `path`. One that is
+/// not answered within QUICK_MS ends the whole run; it is named here first,
+/// with its checkout, so the run's last words are not the only ones.
+fn asked(path: str, args: List[str]) -> git.Ran ! git.Failure {
+	git.run(path, args, QUICK_MS) else |e| match e {
+		not_found => { return not_found },
+		timeout => {
+			var said = "git"
+			for a in args { said = "{said} {a}" }
+			eprint("sync-repos: `{said}` in {path} did not finish in {in_words(QUICK_MS)}")
+			return timeout
+		},
+		io => { return io },
+	}
+}
+
 /// Look at `path` and say which state it is in. Reads only.
 pub fn inspect(path: str) -> State ! git.Failure {
 	if !fs.exists(path) { return State.Absent }
@@ -95,11 +124,11 @@ pub fn inspect(path: str) -> State ! git.Failure {
 		return if names.len == 0 { State.Empty } else { State.Foreign }
 	}
 
-	let head = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?	
+	let head = asked(path, ["rev-parse", "HEAD"])?
 	if head.code != 0 { return State.Broken }
 
-	let unstaged = git.run(path, ["diff", "--quiet"], QUICK_MS)?
-	let staged = git.run(path, ["diff", "--cached", "--quiet"], QUICK_MS)?
+	let unstaged = asked(path, ["diff", "--quiet"])?
+	let staged = asked(path, ["diff", "--cached", "--quiet"])?
 	if unstaged.code > 1 || unstaged.code < 0 || staged.code > 1 || staged.code < 0 {
 		return State.Unchecked
 	}
@@ -110,12 +139,16 @@ pub fn inspect(path: str) -> State ! git.Failure {
 
 /// Fast-forward a clean checkout. Never merges and never rewrites.
 pub fn pull(path: str, limit_ms: int) -> Pulled ! git.Failure {
-	let before = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?
-	let pulled = git.run(path, ["pull", "--ff-only"], limit_ms)?
+	let before = asked(path, ["rev-parse", "HEAD"])?
+	let pulled = git.run(path, ["pull", "--ff-only"], limit_ms) else |e| match e {
+		not_found => { return not_found },
+		timeout => { return Pulled.TimedOut },
+		io => { return io },
+	}
 
 	if pulled.code != 0 { return Pulled.Refused }
 
-	let after = git.run(path, ["rev-parse", "HEAD"], QUICK_MS)?
+	let after = asked(path, ["rev-parse", "HEAD"])?
 
 	if before.out == after.out { Pulled.UpToDate } else { Pulled.Updated }
 }
@@ -185,7 +218,7 @@ pub fn strays(parent: str, taken: List[str]) -> List[Stray] ! git.Failure {
 			if t == name { listed = true }
 		}
 		if listed || !fs.exists("{parent}/{name}/.git") { continue }
-		let ran = git.run("{parent}/{name}", ["config", "--get", "remote.origin.url"], QUICK_MS)?
+		let ran = asked("{parent}/{name}", ["config", "--get", "remote.origin.url"])?
 		if ran.code == 0 { (mut found).push(Stray { dir: name, origin: ran.out }) }
 	}
 	found
