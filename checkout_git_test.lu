@@ -1,0 +1,61 @@
+//! member: false
+//! A checkout's questions, asked of stand-ins for git: what each answer,
+//! and each answer that never comes, makes of the checkout.
+
+use checkout
+use std.env
+use std.fs
+
+/// A directory under the temporary directory holding a `.git`, as a
+/// checkout looks from outside. Returns its path.
+fn checkout_dir(name: str) -> str {
+	let tmp = env.get("TMPDIR") else "/tmp"
+	let dir = "{tmp}/sync-repos-checkout-test-{env.pid()}/{name}"
+	fs.create_dir_all("{dir}/.git") else |_| {}
+	dir
+}
+
+/// A stand-in for git: a shell script whose body is `body`, named by
+/// `SYNC_REPOS_GIT` from here on. Returns its path.
+fn stand_in(name: str, body: str) -> str {
+	let tmp = env.get("TMPDIR") else "/tmp"
+	let dir = "{tmp}/sync-repos-checkout-test-{env.pid()}"
+	fs.create_dir_all(dir) else |_| {}
+	let path = "{dir}/{name}"
+	fs.write_text(path, "#!/bin/sh\n{body}\n") else |_| {}
+	fs.set_mode(path, 0o755) else |_| {}
+	env.set("SYNC_REPOS_GIT", path) else |_| {}
+	path
+}
+
+/// How `checkout.inspect` reads the checkout at `path`: its state's name.
+fn inspected(path: str) -> str {
+	let state = checkout.inspect(path) else |e| match e {
+		not_found => { return "git not found" },
+		timeout => { return "ran out of time" },
+		io => { return "io" },
+	}
+	"{state}"
+}
+
+const HEAD_LINE: str = "rev-parse) echo 0123456789abcdef0123456789abcdef01234567 ;;"
+
+fn test_a_diff_that_answers_no_change_is_clean() {
+	stand_in("git-clean", "case $1 in {HEAD_LINE} diff) exit 0 ;; esac")
+	let got = inspected(checkout_dir("clean"))
+	assert(got == "State.Clean", got)
+}
+
+fn test_a_diff_that_finds_a_change_is_dirty() {
+	stand_in("git-dirty", "case $1 in {HEAD_LINE} diff) exit 1 ;; esac")
+	let got = inspected(checkout_dir("dirty"))
+	assert(got == "State.Dirty", got)
+}
+
+fn test_a_diff_that_cannot_answer_is_unchecked() {
+	// `diff --quiet` exits 1 for a change and 0 for none; any other status
+	// means git could not compare, which says nothing about local changes.
+	stand_in("git-refuses", "case $1 in {HEAD_LINE} diff) echo 'not yet implemented' >&2; exit 2 ;; esac")
+	let got = inspected(checkout_dir("refuses"))
+	assert(got == "State.Unchecked", got)
+}
