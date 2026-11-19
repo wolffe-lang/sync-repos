@@ -56,3 +56,10 @@ question may take up to 10 minutes; one that takes longer ends the run,
 naming the command and the checkout. Each clone attempt, pull or submodule
 update may take up to 30 minutes; a pull or submodule update that takes
 longer counts as that repository's failure, and the run goes on.
+
+Each git command is named on standard output before it starts, as
+`→ REPO: STEP…`, so a step that takes minutes is never silent. When standard
+error is a terminal, a clone, pull or submodule update also writes its own
+progress there as it runs, and a clone is not asked to be quiet. When it is
+not a terminal (a pipe, a file, a job's log), nothing git writes to standard
+error is passed on, and the output is the same from run to run.
