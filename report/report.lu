@@ -1,6 +1,7 @@
 //! What happened: the lines printed as the sync runs, and the counts.
 
 use std.fs
+use std.io
 use std.term
 
 /// Running totals for one organization or for the whole run.
@@ -42,6 +43,13 @@ pub fn color_wanted() -> bool {
 	size.columns > 0
 }
 
+/// Whether someone is watching: standard error is a terminal. What git
+/// writes there (its progress, as it goes) is worth passing on only then;
+/// to a file or a pipe it would be noise that differs from run to run.
+pub fn watched() -> bool {
+	io.is_terminal(fs.stderr()) else |_| { false }
+}
+
 /// A line with a sign in front, the sign colored when `color` is true.
 fn marked(sign: str, code: str, text: str, color: bool) -> str {
 	if color { "\x1b[{code}m{sign}\x1b[0m {text}" } else { "{sign} {text}" }
@@ -50,6 +58,13 @@ fn marked(sign: str, code: str, text: str, color: bool) -> str {
 /// A line that says what is about to happen.
 pub fn info(text: str, color: bool) -> str {
 	marked("→", "34", text, color)
+}
+
+/// The line that names a step before it starts: who it is for, and what
+/// is being done. `step("pax", "pull --ff-only", false)` is
+/// `→ pax: pull --ff-only…`.
+pub fn step(who: str, what: str, color: bool) -> str {
+	info("{who}: {what}…", color)
 }
 
 /// A line that says something worked.

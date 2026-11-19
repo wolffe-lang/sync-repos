@@ -21,6 +21,11 @@ fn test_the_line() {
     assert(report.line(t) == "Cloned: 0 | Updated: 3 | Skipped: 0 | Failed: 0", report.line(t))
 }
 
+fn test_a_step_names_who_and_what() {
+    let got = report.step("pax", "pull --ff-only", false)
+    assert(got == "→ pax: pull --ff-only…", got)
+}
+
 fn test_plain_marks_have_no_escapes() {
     assert(report.good("repo (cloned)", false) == "✓ repo (cloned)", "plain")
     assert(report.bad("x", true) == "\x1b[31m✗\x1b[0m x", "coloured")
