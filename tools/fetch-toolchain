@@ -1,0 +1,76 @@
+#!/bin/sh
+# fetch-toolchain: stage the pinned wolf into .wolf-bin/.
+#
+# The archive comes from the GitHub release named in wolf-toolchain.toml and
+# is refused unless its sha256 is the pinned one, and unless the wolf inside
+# it says the pinned version line. A stage that already holds the pin is
+# left alone, so this is cheap to run before every build.
+# $SYNC_REPOS_ARCHIVE_DIR takes the archive from a directory instead of the
+# network; the digest decides either way.
+set -eu
+cd "$(dirname "$0")/.."
+
+case "$(uname -s) $(uname -m)" in
+    "Linux x86_64") target=x86_64-unknown-linux-gnu ;;
+    "Linux aarch64" | "Linux arm64") target=aarch64-unknown-linux-gnu ;;
+    "Darwin arm64") target=aarch64-apple-darwin ;;
+    *) echo "fetch-toolchain: no pinned archive for $(uname -s) $(uname -m)" >&2; exit 1 ;;
+esac
+
+value() {  # value KEY: the quoted value of `KEY = "..."`, spaces and all
+    sed -n "s/^$1 = \"\\(.*\\)\"\$/\\1/p" wolf-toolchain.toml | head -1
+}
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+version=$(value version)
+repo=$(value repo)
+want=$(value "$target")
+line=$(value version_line)
+[ -n "$version" ] && [ -n "$repo" ] && [ -n "$want" ] && [ -n "$line" ] || {
+    echo "fetch-toolchain: wolf-toolchain.toml has no complete pin for $target" >&2
+    exit 1
+}
+stamp="$target wolf=$want"
+
+if [ -f .wolf-bin/STAMP ] && [ "$(cat .wolf-bin/STAMP)" = "$stamp" ]; then
+    echo "fetch-toolchain: .wolf-bin/ already holds the pin ($target)"
+    exit 0
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/sync-repos-toolchain.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+base="wolf-$version-$target"
+if [ -n "${SYNC_REPOS_ARCHIVE_DIR:-}" ] && [ -f "$SYNC_REPOS_ARCHIVE_DIR/$base.tar.gz" ]; then
+    echo "fetch-toolchain: $SYNC_REPOS_ARCHIVE_DIR/$base.tar.gz"
+    cp "$SYNC_REPOS_ARCHIVE_DIR/$base.tar.gz" "$tmp/$base.tar.gz"
+else
+    url="https://github.com/$repo/releases/download/v$version/$base.tar.gz"
+    echo "fetch-toolchain: $url"
+    curl -sSfL --retry 3 --retry-delay 5 -o "$tmp/$base.tar.gz" "$url"
+fi
+
+have=$(sha256 "$tmp/$base.tar.gz")
+if [ "$have" != "$want" ]; then
+    echo "fetch-toolchain: REFUSED: $base.tar.gz sha256 $have, the pin wants $want" >&2
+    exit 1
+fi
+echo "fetch-toolchain: sha256 $have OK"
+
+tar -xzf "$tmp/$base.tar.gz" -C "$tmp"
+said=$("$tmp/$base/wolf" --version | head -1)
+if [ "$said" != "$line" ]; then
+    echo "fetch-toolchain: REFUSED: the archive's wolf says \`$said\`, the pin wants \`$line\`" >&2
+    exit 1
+fi
+
+rm -rf .wolf-bin
+mkdir .wolf-bin
+cp -R "$tmp/$base/." .wolf-bin/
+echo "$stamp" > .wolf-bin/STAMP
+echo "fetch-toolchain: staged $line for $target into .wolf-bin/"
