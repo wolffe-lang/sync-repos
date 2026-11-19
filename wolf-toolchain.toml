@@ -1,0 +1,18 @@
+# The pinned toolchain: wolf from its release archive, by sha256 digest,
+# never from a source build. `tools/fetch-toolchain` downloads the archive
+# for this host, refuses it on a digest mismatch, and stages it into
+# `.wolf-bin/` (ignored by git). The archive carries the standard library
+# and the runtime the native build links.
+#
+# `version_line` is the first line of `wolf --version`; the stage is refused
+# when the staged wolf says anything else. `rev` is the commit the tag names.
+# One digest per host target sync-repos is built on in CI or by hand.
+
+[wolf]
+version = "0.2.36"
+repo = "wolffe-lang/wolf-lang"
+rev = "86d61559f6d75c143330c07b572bd1a63f01606f"
+version_line = "wolf 0.2.36 (wolfgang, pin 5adf3d9)"
+aarch64-apple-darwin = "b79d55845f349d56789d9d1cb057ee88b5a7128d3b6dd77ca070707cfa4aa632"
+x86_64-unknown-linux-gnu = "d383c74c8cd123b9d9dfaa268271d4f004294f85c2b230237d0ef07027d9500d"
+aarch64-unknown-linux-gnu = "3d5bd9ef47d3d198dd67fb3f995dff3ef7b169097529fa0e7ae8524e723be3d4"
