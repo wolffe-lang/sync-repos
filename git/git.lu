@@ -1,5 +1,8 @@
-//! Running git: one child process at a time, with a time limit.
+//! Running git: one child process at a time, with a time limit. A step is
+//! named on standard output before it starts, and a slow one may write to
+//! the terminal while it runs.
 
+use report
 use std.bytes
 use std.fs
 use std.env
@@ -67,8 +70,33 @@ fn drain(mut from: fs.File, mut kept: List[byte]) -> int {
 	moved
 }
 
-/// Run `git ARGS` in directory `dir`, keeping what it prints, for at most `limit_ms`.
+/// Run `git ARGS` in directory `dir`, keeping what it prints, for at most
+/// `limit_ms`. What it writes to standard error is dropped.
 pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
+	run_with(dir, args, limit_ms, false)
+}
+
+/// Name a step, then run it as `run` does. The line `WHO: WHAT…` is
+/// printed before git starts, so a step that takes minutes is never
+/// silent. A `loud` step's standard error is this program's own when that
+/// is a terminal; a step that is not loud, or that nobody is watching,
+/// has it dropped.
+pub fn step(
+	who: str,
+	what: str,
+	loud: bool,
+	dir: str,
+	args: List[str],
+	limit_ms: int,
+) -> Ran ! Failure {
+	print(report.step(who, what, report.color_wanted()))
+	run_with(dir, args, limit_ms, loud && report.watched())
+}
+
+/// Run `git ARGS` in `dir` for at most `limit_ms`, keeping what it prints.
+/// With `errors_shown`, git keeps this program's standard error; without,
+/// it gets `/dev/null`.
+fn run_with(dir: str, args: List[str], limit_ms: int, errors_shown: bool) -> Ran ! Failure {
 	let back = env.cwd()?
 	env.set_cwd(dir) else |_| { return not_found }
 	defer env.set_cwd(back) else |_| {}
@@ -83,7 +111,7 @@ pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 
 	process.set_stdin(mut command, null)
 	process.set_stdout(mut command, pipe.write)
-	process.set_stderr(mut command, null)
+	if !errors_shown { process.set_stderr(mut command, null) }
 
 	var child = process.start(command) else |e| match e{
 		not_found => { return not_found },
