@@ -1,0 +1,48 @@
+# Build, unit tests and check.sh, with the wolf that wolf-toolchain.toml
+# pins by digest, on Linux x86-64 and macOS arm64. check.sh's terminal row
+# needs python3; a run in which any row was not run is not a pass here.
+
+name: ci
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: build, unit, check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the pinned wolf, by digest
+        run: tools/fetch-toolchain
+
+      - name: build
+        run: .wolf-bin/wolf build --deny-warnings sync-repos.lu
+
+      - name: unit
+        run: .wolf-bin/wolf test
+
+      - name: check, every row run
+        run: |
+          set -o pipefail
+          sh ./check.sh | tee check.log
+          [ "$(tail -1 check.log)" = "check: all passed" ]
