@@ -47,6 +47,10 @@ sh ./check.sh
 ./sync-repos
 ```
 
+`tools/fetch-toolchain` stages the wolf that `wolf-toolchain.toml` pins by
+digest into `.wolf-bin/`; CI builds and tests with it (`.wolf-bin/wolf`) on
+Linux and macOS.
+
 `--only NAME` selects one entry by its local directory or organization.
 Dirty checkouts and checkouts that cannot fast-forward are left alone, as
 are repositories already checked out under another name, and checkouts git
