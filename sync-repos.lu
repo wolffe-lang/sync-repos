@@ -88,7 +88,7 @@ fn preview(state: checkout.State, repo: str, url: str, color: bool) -> Did {
 /// the repository itself is in place. An update that ran past its limit
 /// fails the repository: the answer is true then.
 fn tend(path: str, repo: str, color: bool) -> bool ! git.Failure {
-	match checkout.submodules(path, SLOW_MS)? {
+	match checkout.submodules(repo, path, SLOW_MS)? {
 		checkout.Subs.None | checkout.Subs.Current => {},
 		checkout.Subs.Updated => { print(report.good("  {repo}: submodules updated", color)) },
 		checkout.Subs.Failed => { print(report.warn("  {repo}: submodule update failed", color)) } ,
@@ -121,7 +121,7 @@ fn sync_repo(
 	let path = "{dir}/{local}"
 	let url = remote_of(org, repo, opts.ssh)
 	let shown = label(repo, local)
-	let state = checkout.inspect(path)?
+	let state = checkout.inspect(shown, path)?
 	let moved = match state {
 		checkout.State.Absent | checkout.State.Empty => checkout.elsewhere(strays, org.name, repo),
 		_ => "",
@@ -155,7 +155,7 @@ fn sync_repo(
 			print(report.warn("{shown} (uncommitted changes, skipping)", color))
 			Did.Skipped
 		},
-		checkout.State.Clean => match checkout.pull(path, SLOW_MS)? {
+		checkout.State.Clean => match checkout.pull(shown, path, SLOW_MS)? {
 			checkout.Pulled.UpToDate => {
 				print(report.good("{shown} (up to date)", color))
 				if tend(path, shown, color)? { Did.Failed } else { Did.Nothing }
@@ -175,9 +175,7 @@ fn sync_repo(
 			},
 		},
 		checkout.State.Absent | checkout.State.Empty => {
-			print(report.info("cloning {shown}...", color))
-
-			match checkout.clone(url, dir, local, TRIES, SLOW_MS)? {
+			match checkout.clone(shown, url, dir, local, TRIES, SLOW_MS)? {
 				checkout.Cloned.Full => {
 					print(report.good("{shown} (cloned)", color))
 					if tend(path, shown, color)? { Did.Failed } else { Did.Cloned }

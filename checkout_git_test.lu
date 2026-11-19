@@ -30,7 +30,7 @@ fn stand_in(name: str, body: str) -> str {
 
 /// How `checkout.inspect` reads the checkout at `path`: its state's name.
 fn inspected(path: str) -> str {
-	let state = checkout.inspect(path) else |e| match e {
+	let state = checkout.inspect("repo", path) else |e| match e {
 		not_found => { return "git not found" },
 		timeout => { return "ran out of time" },
 		io => { return "io" },
@@ -62,7 +62,7 @@ fn test_a_diff_that_cannot_answer_is_unchecked() {
 
 /// How `checkout.pull` of the checkout at `path` ends, with `limit_ms`.
 fn pulled(path: str, limit_ms: int) -> str {
-	let got = checkout.pull(path, limit_ms) else |e| match e {
+	let got = checkout.pull("repo", path, limit_ms) else |e| match e {
 		not_found => { return "git not found" },
 		timeout => { return "ran out of time" },
 		io => { return "io" },
@@ -72,7 +72,7 @@ fn pulled(path: str, limit_ms: int) -> str {
 
 /// How `checkout.submodules` of the checkout at `path` ends, with `limit_ms`.
 fn tended(path: str, limit_ms: int) -> str {
-	let got = checkout.submodules(path, limit_ms) else |e| match e {
+	let got = checkout.submodules("repo", path, limit_ms) else |e| match e {
 		not_found => { return "git not found" },
 		timeout => { return "ran out of time" },
 		io => { return "io" },

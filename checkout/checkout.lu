@@ -2,6 +2,7 @@
 //! bring it up to date
 
 use git
+use report
 use std.fs
 
 /// what is at a repository's path before anything is done to it.
@@ -48,16 +49,14 @@ pub fn stale(status: str) -> bool {
 
 /// Bring the submodules of the checkout at `path` to the commits it
 /// records. Does nothing, and runs nothing, when there is no `.gitmodules`.
-pub fn submodules(path: str, limit_ms: int) -> Subs ! git.Failure {
+/// `who` is the repository's name in the lines that name each step.
+pub fn submodules(who: str, path: str, limit_ms: int) -> Subs ! git.Failure {
     if !fs.exists("{path}/.gitmodules") { return Subs.None }
-    let status = asked(path, ["submodule", "status", "--recursive"])?
+    let status = asked(who, path, ["submodule", "status", "--recursive"])?
     if status.code != 0 { return Subs.Failed }
     if !stale(status.out) { return Subs.Current }
-    let ran = git.run(
-        path,
-        ["submodule", "update", "--init", "--recursive"],
-        limit_ms,
-    ) else |e| match e {
+    let update = ["submodule", "update", "--init", "--recursive"]
+    let ran = git.step(who, said(update), true, path, update, limit_ms) else |e| match e {
         not_found => { return not_found },
         timeout => { return Subs.TimedOut },
         io => { return io },
@@ -100,35 +99,42 @@ pub fn in_words(limit_ms: int) -> str {
 	"{limit_ms / 1000} seconds"
 }
 
-/// Ask git a quick local question in the checkout at `path`. One that is
-/// not answered within QUICK_MS ends the whole run; it is named here first,
+/// `args` as one would type them: `pull --ff-only`.
+pub fn said(args: List[str]) -> str {
+	var words = ""
+	for a in args { words = if words == "" { a } else { "{words} {a}" } }
+	words
+}
+
+/// Ask git a quick local question in the checkout at `path`, naming it
+/// first as `who`'s step. Its standard error is never shown. One that is
+/// not answered within QUICK_MS ends the whole run; it is named here again,
 /// with its checkout, so the run's last words are not the only ones.
-fn asked(path: str, args: List[str]) -> git.Ran ! git.Failure {
-	git.run(path, args, QUICK_MS) else |e| match e {
+fn asked(who: str, path: str, args: List[str]) -> git.Ran ! git.Failure {
+	git.step(who, said(args), false, path, args, QUICK_MS) else |e| match e {
 		not_found => { return not_found },
 		timeout => {
-			var said = "git"
-			for a in args { said = "{said} {a}" }
-			eprint("sync-repos: `{said}` in {path} did not finish in {in_words(QUICK_MS)}")
+			eprint("sync-repos: `git {said(args)}` in {path} did not finish in {in_words(QUICK_MS)}")
 			return timeout
 		},
 		io => { return io },
 	}
 }
 
-/// Look at `path` and say which state it is in. Reads only.
-pub fn inspect(path: str) -> State ! git.Failure {
+/// Look at `path` and say which state it is in. Reads only. `who` names
+/// the repository in the lines that name each question.
+pub fn inspect(who: str, path: str) -> State ! git.Failure {
 	if !fs.exists(path) { return State.Absent }
 	if !fs.exists("{path}/.git") {
 		let names = fs.read_dir(path) else |_| { return State.Foreign }
 		return if names.len == 0 { State.Empty } else { State.Foreign }
 	}
 
-	let head = asked(path, ["rev-parse", "HEAD"])?
+	let head = asked(who, path, ["rev-parse", "HEAD"])?
 	if head.code != 0 { return State.Broken }
 
-	let unstaged = asked(path, ["diff", "--quiet"])?
-	let staged = asked(path, ["diff", "--cached", "--quiet"])?
+	let unstaged = asked(who, path, ["diff", "--quiet"])?
+	let staged = asked(who, path, ["diff", "--cached", "--quiet"])?
 	if unstaged.code > 1 || unstaged.code < 0 || staged.code > 1 || staged.code < 0 {
 		return State.Unchecked
 	}
@@ -138,9 +144,10 @@ pub fn inspect(path: str) -> State ! git.Failure {
 }
 
 /// Fast-forward a clean checkout. Never merges and never rewrites.
-pub fn pull(path: str, limit_ms: int) -> Pulled ! git.Failure {
-	let before = asked(path, ["rev-parse", "HEAD"])?
-	let pulled = git.run(path, ["pull", "--ff-only"], limit_ms) else |e| match e {
+pub fn pull(who: str, path: str, limit_ms: int) -> Pulled ! git.Failure {
+	let before = asked(who, path, ["rev-parse", "HEAD"])?
+	let pull = ["pull", "--ff-only"]
+	let pulled = git.step(who, said(pull), true, path, pull, limit_ms) else |e| match e {
 		not_found => { return not_found },
 		timeout => { return Pulled.TimedOut },
 		io => { return io },
@@ -148,15 +155,16 @@ pub fn pull(path: str, limit_ms: int) -> Pulled ! git.Failure {
 
 	if pulled.code != 0 { return Pulled.Refused }
 
-	let after = asked(path, ["rev-parse", "HEAD"])?
+	let after = asked(who, path, ["rev-parse", "HEAD"])?
 
 	if before.out == after.out { Pulled.UpToDate } else { Pulled.Updated }
 }
 
 /// The arguments for clone attempt `attempt` of `of`: a full clone, and a 
-/// shallow one on the last attempt.
-pub fn clone_args(url: str, name: str, attempt: int, of: int) -> List[str] {
-	var args = ["clone", "--quiet"]
+/// shallow one on the last attempt. A `quiet` clone reports no progress.
+pub fn clone_args(url: str, name: str, attempt: int, of: int, quiet: bool) -> List[str] {
+	var args = ["clone"]
+	if quiet { (mut args).push("--quiet") }
 
 	if attempt == of && of > 1 {
 		(mut args).push("--depth")
@@ -169,18 +177,39 @@ pub fn clone_args(url: str, name: str, attempt: int, of: int) -> List[str] {
 	args
 }
 
-/// Clone `url` into `parent/name`, trying up to `tries` times. A failed
-/// attempt's leftovers are removed before the next. A time limit reached
-/// counts as a failed attempt, not as a failure of the whole clone.
-pub fn clone(url: str, parent: str, name: str, tries: int, limit_ms: int) -> Cloned ! git.Failure {
+/// How clone attempt `attempt` of `of` is named as a step: `clone`, and
+/// from the second on which attempt it is, and that the last is shallow.
+pub fn clone_step(attempt: int, of: int) -> str {
+	if attempt == 1 { return "clone" }
+	if attempt == of { return "clone --depth 1, attempt {attempt} of {of}" }
+	"clone, attempt {attempt} of {of}"
+}
+
+/// Clone `url` into `parent/name`, trying up to `tries` times, naming each
+/// attempt first as `who`'s step. A failed attempt's leftovers are removed
+/// before the next. A time limit reached counts as a failed attempt, not as
+/// a failure of the whole clone. The clone reports its progress when
+/// someone is watching, and is quiet otherwise.
+pub fn clone(
+	who: str,
+	url: str,
+	parent: str,
+	name: str,
+	tries: int,
+	limit_ms: int,
+) -> Cloned ! git.Failure {
 	let path = "{parent}/{name}"
+	let quiet = !report.watched()
 
 	var attempt = 1
 	while attempt <= tries {
 		if fs.exists(path) { fs.remove_dir_all(path) else |_| { return io } }
-		let ran = git.run(
+		let ran = git.step(
+			who,
+			clone_step(attempt, tries),
+			true,
 			parent,
-			clone_args(url, name, attempt, tries),
+			clone_args(url, name, attempt, tries, quiet),
 			limit_ms,
 		) else |e| match e {
 			not_found => { return not_found },
@@ -218,7 +247,7 @@ pub fn strays(parent: str, taken: List[str]) -> List[Stray] ! git.Failure {
 			if t == name { listed = true }
 		}
 		if listed || !fs.exists("{parent}/{name}/.git") { continue }
-		let ran = asked("{parent}/{name}", ["config", "--get", "remote.origin.url"])?
+		let ran = asked(name, "{parent}/{name}", ["config", "--get", "remote.origin.url"])?
 		if ran.code == 0 { (mut found).push(Stray { dir: name, origin: ran.out }) }
 	}
 	found
