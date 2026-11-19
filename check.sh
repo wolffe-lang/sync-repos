@@ -14,6 +14,10 @@ prog="$here/sync-repos"
 work=$(mktemp -d "${TMPDIR:-/tmp}/sync-repos-check.XXXXXX") || exit 2
 trap 'rm -rf "$work"' EXIT
 
+# Nothing here reads the caller's own files or runs the caller's shell.
+mkdir "$work/home"
+export HOME="$work/home" SHELL=/bin/sh
+
 fails=0
 expect() {  # expect NAME WANT GOT
     if [ "$2" = "$3" ]; then
