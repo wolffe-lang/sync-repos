@@ -1,6 +1,6 @@
-//! Running git: one child process at a time, with a time limit. A step is
-//! named on standard output before it starts, and a slow one may write to
-//! the terminal while it runs.
+//! Running git: one child process at a time, with a time limit. A step
+//! that can take long is named on standard output before it starts, and
+//! may write to the terminal while it runs.
 
 use report
 use std.bytes
@@ -76,21 +76,19 @@ pub fn run(dir: str, args: List[str], limit_ms: int) -> Ran ! Failure {
 	run_with(dir, args, limit_ms, false)
 }
 
-/// Name a step, then run it as `run` does. The line `WHO: WHAT…` is
-/// printed before git starts, so a step that takes minutes is never
-/// silent. A `loud` step's standard error is this program's own when that
-/// is a terminal; a step that is not loud, or that nobody is watching,
-/// has it dropped.
+/// Name a step that can take long, then run it as `run` does. The line
+/// `WHO: WHAT…` is printed before git starts, so a step that takes minutes
+/// is never silent. Its standard error is this program's own when that is
+/// a terminal, and dropped when nobody is watching.
 pub fn step(
 	who: str,
 	what: str,
-	loud: bool,
 	dir: str,
 	args: List[str],
 	limit_ms: int,
 ) -> Ran ! Failure {
 	print(report.step(who, what, report.color_wanted()))
-	run_with(dir, args, limit_ms, loud && report.watched())
+	run_with(dir, args, limit_ms, report.watched())
 }
 
 /// Run `git ARGS` in `dir` for at most `limit_ms`, keeping what it prints.

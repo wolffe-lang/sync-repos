@@ -121,7 +121,7 @@ fn sync_repo(
 	let path = "{dir}/{local}"
 	let url = remote_of(org, repo, opts.ssh)
 	let shown = label(repo, local)
-	let state = checkout.inspect(shown, path)?
+	let state = checkout.inspect(path)?
 	let moved = match state {
 		checkout.State.Absent | checkout.State.Empty => checkout.elsewhere(strays, org.name, repo),
 		_ => "",

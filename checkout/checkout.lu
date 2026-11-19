@@ -49,14 +49,14 @@ pub fn stale(status: str) -> bool {
 
 /// Bring the submodules of the checkout at `path` to the commits it
 /// records. Does nothing, and runs nothing, when there is no `.gitmodules`.
-/// `who` is the repository's name in the lines that name each step.
+/// `who` is the repository's name in the line that names the update.
 pub fn submodules(who: str, path: str, limit_ms: int) -> Subs ! git.Failure {
     if !fs.exists("{path}/.gitmodules") { return Subs.None }
-    let status = asked(who, path, ["submodule", "status", "--recursive"])?
+    let status = asked(path, ["submodule", "status", "--recursive"])?
     if status.code != 0 { return Subs.Failed }
     if !stale(status.out) { return Subs.Current }
     let update = ["submodule", "update", "--init", "--recursive"]
-    let ran = git.step(who, said(update), true, path, update, limit_ms) else |e| match e {
+    let ran = git.step(who, said(update), path, update, limit_ms) else |e| match e {
         not_found => { return not_found },
         timeout => { return Subs.TimedOut },
         io => { return io },
@@ -106,12 +106,12 @@ pub fn said(args: List[str]) -> str {
 	words
 }
 
-/// Ask git a quick local question in the checkout at `path`, naming it
-/// first as `who`'s step. Its standard error is never shown. One that is
-/// not answered within QUICK_MS ends the whole run; it is named here again,
+/// Ask git a quick local question in the checkout at `path`. It is not
+/// named as a step, and its standard error is never shown. One that is
+/// not answered within QUICK_MS ends the whole run; it is named here first,
 /// with its checkout, so the run's last words are not the only ones.
-fn asked(who: str, path: str, args: List[str]) -> git.Ran ! git.Failure {
-	git.step(who, said(args), false, path, args, QUICK_MS) else |e| match e {
+fn asked(path: str, args: List[str]) -> git.Ran ! git.Failure {
+	git.run(path, args, QUICK_MS) else |e| match e {
 		not_found => { return not_found },
 		timeout => {
 			eprint("sync-repos: `git {said(args)}` in {path} did not finish in {in_words(QUICK_MS)}")
@@ -121,20 +121,19 @@ fn asked(who: str, path: str, args: List[str]) -> git.Ran ! git.Failure {
 	}
 }
 
-/// Look at `path` and say which state it is in. Reads only. `who` names
-/// the repository in the lines that name each question.
-pub fn inspect(who: str, path: str) -> State ! git.Failure {
+/// Look at `path` and say which state it is in. Reads only.
+pub fn inspect(path: str) -> State ! git.Failure {
 	if !fs.exists(path) { return State.Absent }
 	if !fs.exists("{path}/.git") {
 		let names = fs.read_dir(path) else |_| { return State.Foreign }
 		return if names.len == 0 { State.Empty } else { State.Foreign }
 	}
 
-	let head = asked(who, path, ["rev-parse", "HEAD"])?
+	let head = asked(path, ["rev-parse", "HEAD"])?
 	if head.code != 0 { return State.Broken }
 
-	let unstaged = asked(who, path, ["diff", "--quiet"])?
-	let staged = asked(who, path, ["diff", "--cached", "--quiet"])?
+	let unstaged = asked(path, ["diff", "--quiet"])?
+	let staged = asked(path, ["diff", "--cached", "--quiet"])?
 	if unstaged.code > 1 || unstaged.code < 0 || staged.code > 1 || staged.code < 0 {
 		return State.Unchecked
 	}
@@ -143,11 +142,12 @@ pub fn inspect(who: str, path: str) -> State ! git.Failure {
 	State.Clean
 }
 
-/// Fast-forward a clean checkout. Never merges and never rewrites.
+/// Fast-forward a clean checkout, naming the pull first as `who`'s step.
+/// Never merges and never rewrites.
 pub fn pull(who: str, path: str, limit_ms: int) -> Pulled ! git.Failure {
-	let before = asked(who, path, ["rev-parse", "HEAD"])?
+	let before = asked(path, ["rev-parse", "HEAD"])?
 	let pull = ["pull", "--ff-only"]
-	let pulled = git.step(who, said(pull), true, path, pull, limit_ms) else |e| match e {
+	let pulled = git.step(who, said(pull), path, pull, limit_ms) else |e| match e {
 		not_found => { return not_found },
 		timeout => { return Pulled.TimedOut },
 		io => { return io },
@@ -155,7 +155,7 @@ pub fn pull(who: str, path: str, limit_ms: int) -> Pulled ! git.Failure {
 
 	if pulled.code != 0 { return Pulled.Refused }
 
-	let after = asked(who, path, ["rev-parse", "HEAD"])?
+	let after = asked(path, ["rev-parse", "HEAD"])?
 
 	if before.out == after.out { Pulled.UpToDate } else { Pulled.Updated }
 }
@@ -207,7 +207,6 @@ pub fn clone(
 		let ran = git.step(
 			who,
 			clone_step(attempt, tries),
-			true,
 			parent,
 			clone_args(url, name, attempt, tries, quiet),
 			limit_ms,
@@ -247,7 +246,7 @@ pub fn strays(parent: str, taken: List[str]) -> List[Stray] ! git.Failure {
 			if t == name { listed = true }
 		}
 		if listed || !fs.exists("{parent}/{name}/.git") { continue }
-		let ran = asked(name, "{parent}/{name}", ["config", "--get", "remote.origin.url"])?
+		let ran = asked("{parent}/{name}", ["config", "--get", "remote.origin.url"])?
 		if ran.code == 0 { (mut found).push(Stray { dir: name, origin: ran.out }) }
 	}
 	found
