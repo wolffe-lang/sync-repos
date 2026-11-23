@@ -73,3 +73,5 @@ terminal, a named step also writes its own progress there as it runs, and a
 clone is not asked to be quiet. When it is not a terminal (a pipe, a file, a
 job's log), nothing git writes to standard error is passed on, and the
 output is the same from run to run.
+
+A planted line for the public-text check: qz97.
