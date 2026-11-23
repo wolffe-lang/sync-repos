@@ -51,6 +51,11 @@ sh ./check.sh
 digest into `.wolf-bin/`; CI builds and tests with it (`.wolf-bin/wolf`) on
 Linux and macOS.
 
+`python3 -I tools/check-public-text` checks that the documents, comments and
+CI files hold no internal work-item ids, machine names or planning paths
+(`--self-test` holds the check to its own cases); `public-text.yml` runs both
+on every pull request.
+
 `--only NAME` selects one entry by its local directory or organization.
 Dirty checkouts and checkouts that cannot fast-forward are left alone, as
 are repositories already checked out under another name, and checkouts git
